@@ -10,7 +10,7 @@ options are applied in the order given.
 
 The PNGs are committed source art; this script only matters when
 regenerating the .info files (themselves committed static assets, so
-building the stack needs nothing here). Same pipeline as poseidon-backport's
+building the stack needs nothing here). Same pipeline as Neptune's
 dist/icons/, which documents the tooling.
 
 Descriptor keys:

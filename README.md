@@ -13,11 +13,11 @@ A fast, modern TCP/IP stack for classic AmigaOS 3.2.
 > come from. Today the only netdev driver is
 > [`genet.device`](https://github.com/rondoval/emu68-driver-stack), **version 4.x or
 > later** — the onboard Ethernet driver for a Raspberry Pi 4 or CM4 running under
-> PiStorm/Emu68. Everything else — Poseidon USB Ethernet adapters, network cards, and
-> other Ethernet drivers written for AmigaOS — speaks classic SANA-II, and those work
-> too: the stack detects the driver type when an interface is added and drives SANA-II
-> hardware through a compatibility backend (Ethernet-type SANA-II only — no Token Ring,
-> ArcNet, or serial-line drivers). SANA-II is copy-based and offload-blind by design, so
+> PiStorm/Emu68. Everything else — USB Ethernet adapters (Neptune or Poseidon),
+> network cards, and other Ethernet drivers written for AmigaOS — speaks classic
+> SANA-II, and those work too: the stack detects the driver type when an interface is
+> added and drives SANA-II hardware through a compatibility backend (Ethernet-type
+> SANA-II only — no Token Ring, ArcNet, or serial-line drivers). SANA-II is copy-based and offload-blind by design, so
 > expect a fraction of netdev throughput.
 
 > **Who this is for.** lwip-amiga is built for classic Amigas with an accelerator,

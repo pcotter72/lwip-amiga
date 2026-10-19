@@ -12,7 +12,7 @@ flowchart TB
     drv["<b>genet.device</b><br/>first hardware driver"]
     nic["BCM GENET NIC<br/>(Pi4 / CM4 under PiStorm / Emu68)"]
     s2["<b>SANA-II backend</b> — port/amiga/sana2_*.c<br/>cooked-mode IORequests, client-side RX pump"]
-    s2drv["any SANA-II driver<br/>(Poseidon USB NICs, network cards, ...)"]
+    s2drv["any SANA-II driver<br/>(USB NICs under Neptune or Poseidon, network cards, ...)"]
 
     app -->|library LVOs| bsd
     bsd -->|tcp_/udp_/raw_ calls under the core lock| lwip
