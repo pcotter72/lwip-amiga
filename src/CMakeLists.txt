@@ -31,7 +31,7 @@ set(RELEASE_STRING "lwip-amiga ${lwip-amiga_VERSION_MAJOR}.${lwip-amiga_VERSION_
 # toolchain (cmake/toolchain.cmake) and are not repeated per target.
 set(LWIP_WARN -Wall -Wextra)
 
-find_package(Emu68Common CONFIG REQUIRED)
+find_package(Emu68Common 2.0 CONFIG REQUIRED)
 
 # Sink + tier compile definitions (DEBUG_SINK/DEBUG_SERIAL/PROFILE/DEBUG/TRACE) apply only to
 # targets created after this call — it must precede every target in this dir.

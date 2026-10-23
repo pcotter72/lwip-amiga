@@ -1,3 +1,23 @@
+# Release notes - lwip-amiga 1.7
+
+Changes since v1.6. Ships `bsdsocket.library` 4.107.
+
+---
+
+## Documentation
+
+- USB network adapters work under Neptune as well as Poseidon, and the README,
+  the architecture document and the comments now say so.
+
+---
+
+## Build & tooling
+
+- `find_package()` asks for emu68-common 2.0 or newer, the version the stack
+  builds against: an older one fails at configure instead of mid-build.
+
+---
+
 # Release notes — lwip-amiga 1.6
 
 Changes since v1.5.
