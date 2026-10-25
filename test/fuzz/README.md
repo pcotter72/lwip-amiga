@@ -38,8 +38,10 @@ The TCP configuration mirrors `port/amiga/include/lwipopts.h` (MSS 1460,
 ```
 
 On a violation it prints the failed invariant, the pcb state, and a ring
-buffer of the last 128 operations, then aborts; runs are deterministic per
-seed. Vanilla 2.2.1 reproduces the corruption in seconds (e.g. seed 68);
+buffer of the last 128 operations, then aborts. Each seed's operation sequence
+is deterministic, but lwIP is initialised once per process, so its timers and
+sequence numbers carry over from seed to seed: reproduce a failure by rerunning
+the sweep from the same start seed, not that seed alone. Vanilla 2.2.1 reproduces the corruption in seconds (e.g. seed 68);
 with the fork's `tcp_out.c`/`tcp_in.c` fixes the standard sweep passes.
 
 ## Licensing / provenance
