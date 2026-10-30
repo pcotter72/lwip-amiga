@@ -460,7 +460,7 @@ static void SbStackTask(void)
     netstack_unlock();
     CloseDevice(&tick->tr_node);
 
-out:
+out:;
     /* Everything the epilogue needs, captured BEFORE stackTask is cleared:
      * the moment it is, a racing OpenLibrary may restart the stack and
      * sb_stack_start re-zeroes the shared ctx — locals only from here on. */
