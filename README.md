@@ -377,6 +377,13 @@ exported `Netdev` package) and shares the stack-wide debug backend / `EMU68_TIER
 options — `lwip-amiga` is a valid component name for `EMU68_PROFILE`,
 `EMU68_DEBUG` and `EMU68_TRACE`.
 
+One option is this component's own: `LWIP_AMIGA_DHCP_ACD` (default `ON`). With it on,
+a DHCP lease is probed for conflicts before it is used (RFC 5227: three ARP probes and
+two announcements), which puts 6-9 seconds between the DHCP exchange and a usable
+interface. `-D LWIP_AMIGA_DHCP_ACD=OFF` binds the lease as soon as the server's ACK
+arrives and announces it with one gratuitous ARP, relying on the server's own
+conflict check; `AddNetInterface` then returns as soon as the lease is bound.
+
 #### `sockbench` (developer tool, built but not shipped)
 
 LAN TCP/UDP throughput benchmark over the NDK BSD socket API (`bsdsocket.library`):

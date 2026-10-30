@@ -64,6 +64,15 @@ add_library(netstack STATIC
 
 target_compile_options(netstack PRIVATE -O3 ${LWIP_WARN})
 
+# DHCP address conflict detection (lwIP's LWIP_DHCP_DOES_ACD_CHECK; the
+# rationale and the timing it costs are in port/amiga/include/lwipopts.h).
+# PUBLIC: struct dhcp has an acd member under the same macro, and the library
+# sources that include lwip/dhcp.h must see the layout lwIP was compiled with.
+option(LWIP_AMIGA_DHCP_ACD "Probe a DHCP lease for conflicts (RFC 5227) before binding it; OFF binds on the ACK" ON)
+if(NOT LWIP_AMIGA_DHCP_ACD)
+    target_compile_definitions(netstack PUBLIC LWIP_DHCP_DOES_ACD_CHECK=0)
+endif()
+
 # Vendored upstream lwIP; we do not patch it.  At -O3 GCC unrolls the option
 # loops in dhcp_discover/select/renew/reboot but cannot bound options_out_len
 # (dhcp_create_msg hands it back through a pointer out-param), so it flags the

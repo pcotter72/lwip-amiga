@@ -49,6 +49,22 @@
 #define LWIP_TCP                        1
 #define LWIP_IGMP                       1   /* multicast; required by the mDNS responder */
 #define LWIP_DHCP                       1
+/* Address conflict detection on a DHCP lease (RFC 5227 through lwIP's acd
+ * module): after the ACK the stack sends three ARP probes 1-2 s apart and two
+ * announcements 2 s apart and binds the address only then, which puts 6-9 s
+ * between the DHCP exchange and a usable interface (measured 6-8 s on a
+ * PiStorm/Emu68 A1200, GENET and WiFi alike, against a Fritz!Box). The lwIP
+ * default is on. The build option LWIP_AMIGA_DHCP_ACD=OFF (src/CMakeLists.txt)
+ * passes 0 here and the lease is bound as soon as the ACK arrives, trusting
+ * the server's conflict check (RFC 2131 2.2 and 3.1: the server SHOULD
+ * probe the address it offers, e.g. with an ICMP echo; the client SHOULD
+ * probe it too, e.g. with ARP - that client probe is what ACD off drops).
+ * With ACD off lwIP announces every address, DHCP or static, with
+ * one gratuitous ARP from netif_issue_reports; with ACD compiled in that
+ * path is #if'd out and only an acd client announces - the DHCP one. */
+#ifndef LWIP_DHCP_DOES_ACD_CHECK
+#define LWIP_DHCP_DOES_ACD_CHECK        1
+#endif
 #define LWIP_DNS                        1
 #define LWIP_IPV6                       0   /* design stays v6-ready; off in v1 */
 
