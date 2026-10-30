@@ -40,6 +40,7 @@
 #include <memory.h>
 
 #include <lwip/netif.h>
+#include <lwip/dhcp.h>
 #include <lwip/inet_chksum.h>
 #include <lwip/prot/ethernet.h>
 #include <lwip/prot/ip.h>
@@ -97,6 +98,15 @@ struct S2Pump
     ULONG s2p_PortSig;
     struct IOSana2Req s2p_Ev; /* the S2_ONEVENT link tracker */
     BOOL s2p_EvHome, s2p_EvDead;
+    /* The link is up while the unit is online AND its session is open: the
+     * two halves, both seeded TRUE at bring-up (SANA-II has no state query;
+     * a wired driver has no session concept and never says otherwise).
+     * s2p_EvSession: the driver accepted S2EVENT_CONNECT|DISCONNECT in the
+     * event mask. s2p_SessionSeen: it has fired one, so it does report
+     * sessions and CONNECT is only worth arming while disconnected; until
+     * then CONNECT stays armed to catch the first association of a
+     * wireless driver that went online before it joined its network. */
+    BOOL s2p_Online, s2p_Connected, s2p_EvSession, s2p_SessionSeen;
     ULONG s2p_Flight;
     struct S2RxReq *s2p_Parked;
     BOOL s2p_Draining;
@@ -294,10 +304,33 @@ static LONG s2if_pump_setup(struct S2Pump *pp, struct Sana2If *s2i)
     }
 
     /* arm the link tracker for both edges: an immediate preset reply (the
-     * device is online — bring-up just onlined it) seeds the re-arm cycle */
-    pp->s2p_Ev.ios2_WireError = S2EVENT_ONLINE | S2EVENT_OFFLINE;
+     * device is online — bring-up just onlined it) seeds the re-arm cycle.
+     * The session edges ride along; a driver that does not know them
+     * rejects the whole request (S2ERR_NOT_SUPPORTED) and is re-asked for
+     * the link edges alone in s2if_pump_txev. */
+    pp->s2p_Online = TRUE;
+    pp->s2p_Connected = TRUE;
+    pp->s2p_EvSession = TRUE;
+    pp->s2p_SessionSeen = FALSE;
+    pp->s2p_Ev.ios2_WireError = S2EVENT_ONLINE | S2EVENT_OFFLINE |
+                                S2EVENT_CONNECT | S2EVENT_DISCONNECT;
     SendIO(&pp->s2p_Ev.ios2_Req);
     return 0;
+}
+
+/* The event mask for the next S2_ONEVENT: the link edge that would change
+ * the state, plus the session edge that would, plus CONNECT until the
+ * driver has shown it reports sessions at all. */
+static ULONG s2if_pump_ev_mask(const struct S2Pump *pp)
+{
+    ULONG mask = pp->s2p_Online ? S2EVENT_OFFLINE : S2EVENT_ONLINE;
+    if (pp->s2p_EvSession)
+    {
+        mask |= pp->s2p_Connected ? S2EVENT_DISCONNECT : S2EVENT_CONNECT;
+        if (!pp->s2p_SessionSeen)
+            mask |= S2EVENT_CONNECT;
+    }
+    return mask;
 }
 
 /* NULL-tolerant: serves both the setup-failure path and final teardown. */
@@ -450,17 +483,54 @@ static void s2if_pump_txev(struct S2Pump *pp)
             if (err == 0)
             {
                 ULONG fired = pp->s2p_Ev.ios2_WireError;
+                const char *name = ((struct NetIfBase *)nf->state)->nib_Name;
+                BOOL wasUp = netif_is_link_up(nf) != 0;
                 if (fired & S2EVENT_OFFLINE)
+                    pp->s2p_Online = FALSE;
+                if (fired & S2EVENT_ONLINE)
+                    pp->s2p_Online = TRUE;
+                if (fired & S2EVENT_DISCONNECT)
+                {
+                    pp->s2p_Connected = FALSE;
+                    pp->s2p_SessionSeen = TRUE;
+                    netstack_log(NS_LOG_NOTICE, "%s: driver closed its session (disconnected)", name);
+                }
+                if (fired & S2EVENT_CONNECT)
+                {
+                    pp->s2p_Connected = TRUE;
+                    pp->s2p_SessionSeen = TRUE;
+                    netstack_log(NS_LOG_NOTICE, "%s: driver opened its session (connected)", name);
+                }
+                if (!pp->s2p_Online || !pp->s2p_Connected)
                     netif_set_link_down(nf);
+                else if (!wasUp)
+                    netif_set_link_up(nf); /* lwIP restarts DHCP on this itself */
+                else if (fired & S2EVENT_CONNECT)
+                {
+                    /* a session opened on a link lwIP already held up: the
+                     * seeded bring-up state, before a wireless driver had
+                     * joined its network. A DHCP DISCOVER sent into that
+                     * void would wait out its backoff; restart it now as a
+                     * link-up would. */
+                    dhcp_network_changed_link_up(nf);
+                }
                 if (fired & S2EVENT_ONLINE)
                 {
-                    netif_set_link_up(nf);
                     unparked = pp->s2p_Parked; /* back in service, off the lock */
                     pp->s2p_Parked = NULL;
                 }
                 rearm = TRUE;
-                rearmMask = netif_is_link_up(nf) ? S2EVENT_OFFLINE
-                                                 : S2EVENT_ONLINE;
+                rearmMask = s2if_pump_ev_mask(pp);
+            }
+            else if (pp->s2p_EvSession)
+            {
+                /* the driver does not know the session events and rejected
+                 * the whole mask (SANA-II: S2ERR_NOT_SUPPORTED with
+                 * S2WERR_BAD_EVENT): ask for the link edges alone, as
+                 * before the session edges were added */
+                pp->s2p_EvSession = FALSE;
+                rearm = TRUE;
+                rearmMask = S2EVENT_ONLINE | S2EVENT_OFFLINE;
             }
             else
             {
