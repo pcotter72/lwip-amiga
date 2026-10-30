@@ -302,6 +302,15 @@ its frames the same way (genet.device 3.17) gets longword moves on both sides.
   config's gratuitous ARP needs the TX reply ports stamped). Link state is
   seeded up (SANA-II has no state query) and tracked thereafter via a
   re-armed `S2_ONEVENT`; drivers without events keep the seeded state.
+  The tracker asks for `S2EVENT_ONLINE|OFFLINE` and, from the same request,
+  `S2EVENT_CONNECT|DISCONNECT`: the link is up only while the unit is online
+  *and* its session is open, so a wireless driver that is online before it
+  has joined its network (CAOSwifi.device reports the association as
+  `CONNECT`) takes the link down on `DISCONNECT` and, on the first `CONNECT`
+  after the seeded bring-up, restarts DHCP at once instead of leaving the
+  DISCOVER that went out before the association to its backoff. A driver
+  that rejects the session bits (`S2ERR_NOT_SUPPORTED`, e.g. genet.device
+  3.x) is re-asked for the link edges alone.
   Multicast joins push as `S2_ADD/DELMULTICASTADDRESS` deltas against a
   shadow of the last programmed set; stats map `S2_GETGLOBALSTATS` plus
   exact glue-side byte counters into the same neutral cache netdev fills.
