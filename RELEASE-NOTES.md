@@ -1,6 +1,7 @@
-# Release notes — lwip-amiga 1.7
+# Release notes — lwip-amiga 1.8
 
-Changes since v1.6.
+Changes since v1.6. Ships `bsdsocket.library` 4.108. Version 1.7 was never
+published, so its changes are listed here.
 
 A compatibility release. Nothing to change in your configuration.
 
@@ -22,6 +23,10 @@ A compatibility release. Nothing to change in your configuration.
   before it could close the network library, and `NetShutdown` waited
   for it forever. It now gets the Ctrl-C back as a signal, as on AmiTCP,
   and quits cleanly.
+- **Programs no longer miss signals in `WaitSelect()`.** A signal was only
+  reported if it arrived during the wait: with a socket already ready, or
+  on a zero-timeout poll, it went unnoticed. One that arrived together
+  with Ctrl-C was lost.
 
 ---
 
@@ -34,13 +39,29 @@ A compatibility release. Nothing to change in your configuration.
   names are the `ObtainInterfaceList` ones, so a name from `SIOCGIFCONF`
   can be passed back. Unknown names give `ENXIO`, `SIOCGIFBRDADDR` on a
   non-broadcast interface `EINVAL`; the `SIOCSIF*` set requests stay
-  `EINVAL` (interfaces are configured with `AddNetInterface`).
+  `EINVAL` (interfaces are configured with `AddNetInterface`). An interface
+  with no address yet answers the address requests with `EADDRNOTAVAIL`,
+  and `SIOCGIFCONF` lists it with a zeroed sockaddr.
 - `WaitSelect()`: a break bit that is also in the caller's `*signals` mask
-  is reported as a user signal (return 0 or the ready count, the bit in
-  `*signals`, consumed), as AmiTCP does. A break outside the user mask
-  still returns -1/`EINTR` with the break re-posted, per the autodoc.
-- The new code is marked `cold`: without it, the LTO build re-partitioned
-  the hot TX/RX code and TCP send throughput dropped by 6-12 % on a 68080.
+  is reported as a user signal, consumed, as AmiTCP does. A break outside
+  the user mask still returns -1/`EINTR` with the break re-posted, per the
+  autodoc, and now leaves any user signal taken with it pending.
+- `WaitSelect()` reports and clears pending user-mask bits on every return
+  of 0 or more, as the autodoc specifies, not only after waiting.
+
+---
+
+## Documentation
+
+- USB network adapters work under Neptune as well as Poseidon, and the README,
+  the architecture document and the comments now say so.
+
+---
+
+## Build & tooling
+
+- `find_package()` asks for emu68-common 2.0 or newer, the version the stack
+  builds against: an older one fails at configure instead of mid-build.
 
 ---
 

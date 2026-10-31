@@ -23,6 +23,7 @@
 
 #include <debug.h>
 #include <memory.h>
+#include <netstack_ctl.h>
 
 #include <lwip/ip4_addr.h>
 #include <lwip/netif.h>
@@ -55,6 +56,7 @@ struct sb_ifconf
 #ifndef __INTELLISENSE__
 _Static_assert(sizeof(struct sb_ifreq) == 32, "ifreq wire ABI");
 _Static_assert(sizeof(struct sb_ifconf) == 8, "ifconf wire ABI");
+_Static_assert(SB_IFNAMSIZ == NETCTL_IFNAME_MAX, "sb_if_name() fills ifr_name");
 #endif
 
 /* --- helpers (core lock held) --------------------------------------------- */
@@ -103,7 +105,11 @@ static LONG sb_ifioctl_conf(struct SocketBase *base, struct sb_ifconf *ifc, BOOL
             break;
         memset(ifr, 0, sizeof(*ifr));
         sb_if_name(nif, ifr->ifr_name);
-        sb_ifioctl_set_addr(ifr, ip4_addr_get_u32(netif_ip4_addr(nif)), old);
+        /* no address yet (DHCP pending): the entry keeps a zeroed sockaddr,
+         * family included, so clients testing sa_family skip it, as on BSD */
+        ULONG addr = ip4_addr_get_u32(netif_ip4_addr(nif));
+        if (addr != 0)
+            sb_ifioctl_set_addr(ifr, addr, old);
         ifr++;
         n++;
     }
@@ -139,6 +145,12 @@ __attribute__((cold)) LONG sb_ifioctl(struct SocketBase *base, ULONG req, APTR a
     }
     ULONG addr = ip4_addr_get_u32(netif_ip4_addr(nif));
     ULONG mask = ip4_addr_get_u32(netif_ip4_netmask(nif));
+    /* no address yet (DHCP pending): EADDRNOTAVAIL as on BSD, never 0.0.0.0 */
+    if (addr == 0 && req != SB_SIOCGIFFLAGS && req != SB_SIOCGIFMETRIC)
+    {
+        netstack_unlock();
+        return sb_fail(base, SB_EADDRNOTAVAIL);
+    }
     LONG rc = 0;
 
     switch (req)

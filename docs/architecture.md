@@ -12,7 +12,7 @@ flowchart TB
     drv["<b>genet.device</b><br/>first hardware driver"]
     nic["BCM GENET NIC<br/>(Pi4 / CM4 under PiStorm / Emu68)"]
     s2["<b>SANA-II backend</b> — port/amiga/sana2_*.c<br/>cooked-mode IORequests, client-side RX pump"]
-    s2drv["any SANA-II driver<br/>(Poseidon USB NICs, network cards, ...)"]
+    s2drv["any SANA-II driver<br/>(USB NICs under Neptune or Poseidon, network cards, ...)"]
 
     app -->|library LVOs| bsd
     bsd -->|tcp_/udp_/raw_ calls under the core lock| lwip
@@ -59,7 +59,9 @@ table included — so every opening task gets its own `errno`, fd table, wait si
 - **Blocking model** (`sb_socket.c`): lwIP completion callbacks record readiness/events
   under the lock and `Signal()` the owning task. A blocking call clears its signal under
   the lock before waiting, so a wakeup can never be missed. Break signals (Ctrl-C by
-  default) surface as `EINTR` and are re-posted. `SO_SNDTIMEO`/`SO_RCVTIMEO` add a
+  default) surface as `EINTR` and are re-posted, except in `WaitSelect` when the caller
+  also put the break bit in its own signal mask: that is a user signal, returned in
+  `*signals` and consumed, as on AmiTCP. `SO_SNDTIMEO`/`SO_RCVTIMEO` add a
   per-call deadline via the opener's `timer.device` request (`sb_wait_to`).
 - **The in-library stack task** (`sb_stack.c`) is a DOS process started under the root's
   open lock by the first `OpenLibrary()`. It reads `ENV:netstack.prefs` (`sb_config.c`:

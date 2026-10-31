@@ -139,7 +139,7 @@ static void s2if_tx_retire(struct Sana2If *s2i, struct S2TxReq *req)
  * Each request goes out with IOF_QUICK: a synchronous driver (genet-sana2)
  * leaves the flag set and the write retires right here — no ReplyMsg from
  * the driver, no pump wakeup, no per-frame task switch. A queuing driver
- * (Poseidon cdceth/lan78xx unit tasks) clears the flag per the quick-I/O
+ * (Neptune cdceth/lan78xx unit tasks) clears the flag per the quick-I/O
  * contract; only those writes enter TxInFlight and reply to the pump. The
  * pump cannot race the in-flight accounting: it harvests replies under
  * this same lock. */
