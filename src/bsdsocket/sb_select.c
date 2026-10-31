@@ -2,6 +2,8 @@
 /*
  * WaitSelect — the autodoc contract, exactly:
  *  - break signal: return -1, errno EINTR, break re-posted, sets UNMODIFIED
+ *    (a break bit the caller also put in *signals counts as a user signal:
+ *    returned there and consumed, as AmiTCP does — see the wait below)
  *  - user signal, nothing ready: return 0, *signals = received user bits
  *  - timeout elapsed: return 0
  *  - otherwise: count of ready descriptors, sets rewritten as ready subsets,
@@ -149,7 +151,13 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
         ULONG sigs = Wait(waitMask);
         netstack_lock();
 
-        if (sigs & base->breakMask)
+        /* A break bit the caller also asked for in *signals is its own user
+         * signal: AmiTCP returns it there and consumes it. Clients written
+         * for that ("sigs = CTRL_C | mine; WaitSelect(...); if (sigs &
+         * CTRL_C) quit") otherwise see -1 with the break still posted, and
+         * libnix's stdio then exit()s them before they close the library. */
+        ULONG brk = sigs & base->breakMask & ~userMask;
+        if (brk)
         {
             netstack_unlock();
             if (timerArmed)
@@ -161,7 +169,8 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
                  * wait using this port */
                 SetSignal(0UL, 1UL << base->timerPort->mp_SigBit);
             }
-            /* the break stays posted; the sets stay unmodified */
+            /* the break stays posted (every break bit Wait() took, so one
+             * also in the user mask is not lost); the sets stay unmodified */
             Signal(base->task, sigs & base->breakMask);
             sb_set_errno(base, SB_EINTR);
             return -1;
