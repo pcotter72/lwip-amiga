@@ -112,6 +112,7 @@ add_executable(bsdsocket_library
     bsdsocket/sb_sockpass.c
     bsdsocket/sb_dnsconfig.c
     bsdsocket/sb_ifquery.c
+    bsdsocket/sb_ifioctl.c
     bsdsocket/sb_gai.c
     bsdsocket/sb_rdns.c
     bsdsocket/sb_netstat.c

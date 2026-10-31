@@ -597,6 +597,19 @@ LONG bsd_IoctlSocket(LONG sock asm("d0"), ULONG req asm("d1"), APTR argp asm("a0
     case SB_SIOCGARP:
     case SB_SIOCGARPT:
         return sb_arp_ioctl(base, req, argp);
+    case SB_SIOCGIFCONF:
+    case SB_OSIOCGIFCONF:
+    case SB_SIOCGIFFLAGS:
+    case SB_SIOCGIFADDR:
+    case SB_OSIOCGIFADDR:
+    case SB_SIOCGIFDSTADDR:
+    case SB_OSIOCGIFDSTADDR:
+    case SB_SIOCGIFBRDADDR:
+    case SB_OSIOCGIFBRDADDR:
+    case SB_SIOCGIFNETMASK:
+    case SB_OSIOCGIFNETMASK:
+    case SB_SIOCGIFMETRIC:
+        return sb_ifioctl(base, req, argp);
     default:
         return sb_fail(base, SB_EINVAL);
     }

@@ -333,7 +333,8 @@ events, TX L4 checksum offload, RX checksum (RAW).
 
 - Socket core: `socket` `bind` `listen` `accept` `connect` `send`/`sendto`
   `recv`/`recvfrom` `shutdown` `CloseSocket` `setsockopt`/`getsockopt`
-  `getsockname`/`getpeername` `IoctlSocket` (`FIONBIO`/`FIONREAD`).
+  `getsockname`/`getpeername` `IoctlSocket` (`FIONBIO`/`FIONREAD`, the ARP requests, and the
+  read-only interface queries `SIOCGIFCONF`/`SIOCGIFFLAGS`/`SIOCGIFADDR`/`SIOCGIFNETMASK`/...).
 - `WaitSelect` (full autodoc semantics: user signal mask, break repost,
   sets-unmodified-on-error), `SetSocketSignals`, `getdtablesize`.
 - `errno` family + `SocketBaseTagList`; the inet utilities
