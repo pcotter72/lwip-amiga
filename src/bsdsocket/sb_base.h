@@ -871,6 +871,9 @@ void sb_addr_out(APTR name, LONG *namelen, ULONG addr, UWORD port);
 /* --- ARP table ioctls (sb_arp.c); caller task, takes the core lock itself  */
 
 LONG sb_arp_ioctl(struct SocketBase *base, ULONG req, APTR argp);
+
+/* --- interface ioctls (sb_ifioctl.c); caller task, takes the lock itself -- */
+
 LONG sb_ifioctl(struct SocketBase *base, ULONG req, APTR argp);
 
 /* --- interfaces (sb_ifquery.c) ------------------------------------------ */

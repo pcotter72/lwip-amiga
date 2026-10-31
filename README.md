@@ -335,8 +335,9 @@ events, TX L4 checksum offload, RX checksum (RAW).
   `recv`/`recvfrom` `shutdown` `CloseSocket` `setsockopt`/`getsockopt`
   `getsockname`/`getpeername` `IoctlSocket` (`FIONBIO`/`FIONREAD`, the ARP requests, and the
   read-only interface queries `SIOCGIFCONF`/`SIOCGIFFLAGS`/`SIOCGIFADDR`/`SIOCGIFNETMASK`/...).
-- `WaitSelect` (full autodoc semantics: user signal mask, break repost,
-  sets-unmodified-on-error), `SetSocketSignals`, `getdtablesize`.
+- `WaitSelect` (autodoc semantics: user signal mask, break repost,
+  sets-unmodified-on-error; a break bit in the caller's own mask is a user
+  signal, as on AmiTCP), `SetSocketSignals`, `getdtablesize`.
 - `errno` family + `SocketBaseTagList`; the inet utilities
   (`inet_addr`/`aton`/`ntop`/`pton`, `Inet_NtoA`, `LnaOf`/`NetOf`/`MakeAddr`/`network`).
 - Resolver: `gethostbyname`/`_r` (lwIP DNS, blocking), `gethostbyaddr`/`_r`,
