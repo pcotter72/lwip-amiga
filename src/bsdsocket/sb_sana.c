@@ -51,7 +51,7 @@ LONG sb_sana_up(struct SbStackCtx *ctx, const struct NetCtlIfConfig *nif,
     APTR bufMgmt = io->ios2_BufferManagement;
 
     /* Wire-type gate. The two S2_DEVICEQUERY size conventions are mutually
-     * exclusive: modern drivers (Poseidon's classes) REFUSE SizeAvailable
+     * exclusive: modern drivers (the Neptune/Poseidon USB classes) REFUSE SizeAvailable
      * below the full RawMTU-bearing struct (34), while a2065-era drivers
      * fail anything ABOVE the original 30-byte layout. So ask full-size
      * first and retry with the legacy size on any error; either way the

@@ -235,6 +235,29 @@ struct sb_linger
 #define SB_SIOCGARP 0xC0246926UL  /* _IOWR('i',38, struct arpreq)    */
 #define SB_SIOCGARPT 0xC00C695BUL /* _IOWR('i',91, struct arptabreq) */
 
+/* Interface query ioctls (sb_ifioctl.c; netinclude sys/sockio.h numbering,
+ * argument structs mirrored there). The O* forms are the 4.3BSD requests,
+ * answered with an osockaddr (16-bit family, no sa_len). */
+#define SB_OSIOCGIFADDR 0xC020690DUL    /* _IOWR('i',13, struct ifreq)  */
+#define SB_OSIOCGIFDSTADDR 0xC020690FUL /* _IOWR('i',15, struct ifreq)  */
+#define SB_SIOCGIFFLAGS 0xC0206911UL    /* _IOWR('i',17, struct ifreq)  */
+#define SB_OSIOCGIFBRDADDR 0xC0206912UL /* _IOWR('i',18, struct ifreq)  */
+#define SB_OSIOCGIFCONF 0xC0086914UL    /* _IOWR('i',20, struct ifconf) */
+#define SB_OSIOCGIFNETMASK 0xC0206915UL /* _IOWR('i',21, struct ifreq)  */
+#define SB_SIOCGIFMETRIC 0xC0206917UL   /* _IOWR('i',23, struct ifreq)  */
+#define SB_SIOCGIFADDR 0xC0206921UL     /* _IOWR('i',33, struct ifreq)  */
+#define SB_SIOCGIFDSTADDR 0xC0206922UL  /* _IOWR('i',34, struct ifreq)  */
+#define SB_SIOCGIFBRDADDR 0xC0206923UL  /* _IOWR('i',35, struct ifreq)  */
+#define SB_SIOCGIFCONF 0xC0086924UL     /* _IOWR('i',36, struct ifconf) */
+#define SB_SIOCGIFNETMASK 0xC0206925UL  /* _IOWR('i',37, struct ifreq)  */
+
+/* netinclude net/if.h if_flags values reported by SIOCGIFFLAGS */
+#define SB_IFF_UP 0x1
+#define SB_IFF_BROADCAST 0x2
+#define SB_IFF_LOOPBACK 0x8
+#define SB_IFF_RUNNING 0x40
+#define SB_IFF_MULTICAST 0x8000
+
 /* netinclude/net/if_arp.h arp_flags values */
 #define SB_ATF_INUSE 0x01       /* entry in use */
 #define SB_ATF_COM 0x02         /* completed entry (MAC valid) */
@@ -849,6 +872,10 @@ void sb_addr_out(APTR name, LONG *namelen, ULONG addr, UWORD port);
 
 LONG sb_arp_ioctl(struct SocketBase *base, ULONG req, APTR argp);
 
+/* --- interface ioctls (sb_ifioctl.c); caller task, takes the lock itself -- */
+
+LONG sb_ifioctl(struct SocketBase *base, ULONG req, APTR argp);
+
 /* --- interfaces (sb_ifquery.c) ------------------------------------------ */
 
 /* name resolution: matches the Roadshow-style identity (NetIfBase nib_Name,
@@ -857,6 +884,10 @@ LONG sb_arp_ioctl(struct SocketBase *base, ULONG req, APTR argp);
 struct netif;
 struct netif *sb_if_find(const char *name);
 BOOL sb_if_is_loopback(const struct netif *nif);
+/* the name an interface is listed under (ObtainInterfaceList, SIOCGIFCONF):
+ * the Roadshow-style identity when it has one, else lwIP's short name; @buf
+ * holds NETCTL_IFNAME_MAX bytes. Core lock held. */
+void sb_if_name(const struct netif *nif, char *buf);
 /* fill a caller-provided sockaddr_in from a network-order address
  * (== host order on 68k); NULL dst is a no-op */
 void sb_if_set_sockaddr(APTR dst, ULONG addr);

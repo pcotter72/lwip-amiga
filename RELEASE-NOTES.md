@@ -1,3 +1,70 @@
+# Release notes — lwip-amiga 1.8
+
+Changes since v1.6. Ships `bsdsocket.library` 4.108. Version 1.7 was never
+published, so its changes are listed here.
+
+A compatibility release. Nothing to change in your configuration.
+
+---
+
+## Bug fixes / Improvements
+
+- **Older network programs can read the interface address again.**
+  Programs written for AmiTCP ask for the interface list and addresses
+  with the classic `SIOCGIFCONF` / `SIOCGIFFLAGS` / `SIOCGIFADDR` requests.
+  These got an error, so for example `GetIPAddress` printed "N/A", and
+  scripts that test the network with it thought it was down. The stack now
+  answers them, with the same names and addresses `netinfo` shows.
+- **The network can be shut down while older daemons are running.** A
+  program written for AmiTCP that waits for Ctrl-C in `WaitSelect()` (it
+  puts Ctrl-C in its own signal mask) was told "interrupted" with the
+  Ctrl-C still pending, instead of receiving it as one of its signals.
+  Built with libnix, such a program was then ended by its own C library
+  before it could close the network library, and `NetShutdown` waited
+  for it forever. It now gets the Ctrl-C back as a signal, as on AmiTCP,
+  and quits cleanly.
+- **Programs no longer miss signals in `WaitSelect()`.** A signal was only
+  reported if it arrived during the wait: with a socket already ready, or
+  on a zero-timeout poll, it went unnoticed. One that arrived together
+  with Ctrl-C was lost.
+
+---
+
+## For developers
+
+- `IoctlSocket()` answers the read-only interface requests `SIOCGIFCONF`,
+  `SIOCGIFFLAGS`, `SIOCGIFADDR`, `SIOCGIFDSTADDR`, `SIOCGIFBRDADDR`,
+  `SIOCGIFNETMASK`, `SIOCGIFMETRIC` and the 4.3BSD `OSIOCGIF*` forms
+  (`osockaddr`), with the netinclude numbering and structs. Interface
+  names are the `ObtainInterfaceList` ones, so a name from `SIOCGIFCONF`
+  can be passed back. Unknown names give `ENXIO`, `SIOCGIFBRDADDR` on a
+  non-broadcast interface `EINVAL`; the `SIOCSIF*` set requests stay
+  `EINVAL` (interfaces are configured with `AddNetInterface`). An interface
+  with no address yet answers the address requests with `EADDRNOTAVAIL`,
+  and `SIOCGIFCONF` lists it with a zeroed sockaddr.
+- `WaitSelect()`: a break bit that is also in the caller's `*signals` mask
+  is reported as a user signal, consumed, as AmiTCP does. A break outside
+  the user mask still returns -1/`EINTR` with the break re-posted, per the
+  autodoc, and now leaves any user signal taken with it pending.
+- `WaitSelect()` reports and clears pending user-mask bits on every return
+  of 0 or more, as the autodoc specifies, not only after waiting.
+
+---
+
+## Documentation
+
+- USB network adapters work under Neptune as well as Poseidon, and the README,
+  the architecture document and the comments now say so.
+
+---
+
+## Build & tooling
+
+- `find_package()` asks for emu68-common 2.0 or newer, the version the stack
+  builds against: an older one fails at configure instead of mid-build.
+
+---
+
 # Release notes — lwip-amiga 1.6
 
 Changes since v1.5.

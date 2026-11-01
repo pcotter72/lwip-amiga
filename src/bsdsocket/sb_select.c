@@ -1,11 +1,16 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * WaitSelect — the autodoc contract, exactly:
+ * WaitSelect — the autodoc contract:
  *  - break signal: return -1, errno EINTR, break re-posted, sets UNMODIFIED
+ *    (a break bit the caller also put in *signals counts as a user signal:
+ *    returned there and consumed, as AmiTCP does — see the wait below)
  *  - user signal, nothing ready: return 0, *signals = received user bits
  *  - timeout elapsed: return 0
  *  - otherwise: count of ready descriptors, sets rewritten as ready subsets,
  *    *signals = received user bits (0 if none)
+ *  - every return >= 0 reports pending user-mask bits in *signals and clears
+ *    them, also when it never waited (ready descriptors, poll); a return of
+ *    -1 leaves them pending
  *  - sets are only written back on returns >= 0
  * fd bits use the BSD layout: 32-bit words, bit (fd % 32) in word (fd / 32).
  */
@@ -149,7 +154,13 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
         ULONG sigs = Wait(waitMask);
         netstack_lock();
 
-        if (sigs & base->breakMask)
+        /* A break bit the caller also asked for in *signals is its own user
+         * signal: AmiTCP returns it there and consumes it. Clients written
+         * for that ("sigs = CTRL_C | mine; WaitSelect(...); if (sigs &
+         * CTRL_C) quit") otherwise see -1 with the break still posted, and
+         * libnix's stdio then exit()s them before they close the library. */
+        ULONG brk = sigs & base->breakMask & ~userMask;
+        if (brk)
         {
             netstack_unlock();
             if (timerArmed)
@@ -161,8 +172,9 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
                  * wait using this port */
                 SetSignal(0UL, 1UL << base->timerPort->mp_SigBit);
             }
-            /* the break stays posted; the sets stay unmodified */
-            Signal(base->task, sigs & base->breakMask);
+            /* what Wait() took stays posted: the break, and any user bit with
+             * it, which a -1 cannot report; the sets stay unmodified */
+            Signal(base->task, sigs & (base->breakMask | userMask));
             sb_set_errno(base, SB_EINTR);
             return -1;
         }
@@ -186,6 +198,9 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
 
     if (hits < 0)
     {
+        /* a socket closed during the wait: a -1 cannot report these either */
+        if (gotUser != 0)
+            Signal(base->task, gotUser);
         sb_set_errno(base, SB_EBADF);
         return -1;
     }
@@ -196,8 +211,9 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
         memcpy(writefds, w_out, copyBytes);
     if (exceptfds != NULL)
         memcpy(exceptfds, e_out, copyBytes);
+    /* every return >= 0, not only those that went through Wait() */
     if (signals != NULL)
-        *signals = gotUser;
+        *signals = gotUser | (SetSignal(0UL, userMask) & userMask);
 
     return hits;
 }

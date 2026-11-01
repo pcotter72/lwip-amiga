@@ -52,6 +52,15 @@ struct netif *sb_if_find(const char *name)
     return netif_find(name);
 }
 
+__attribute__((cold)) void sb_if_name(const struct netif *nif, char *buf)
+{
+    struct NetIfBase *nib = netstack.ns_ActiveIf;
+    if (nib != NULL && nif == &nib->nib_Netif && nib->nib_Name[0] != '\0')
+        strlcpy(buf, nib->nib_Name, NETCTL_IFNAME_MAX);
+    else
+        netif_index_to_name(netif_get_index(nif), buf);
+}
+
 /* Tags whose answers come from the NIC-stats cache / driver caps — data that
  * describes only the active netdev's interface, never e.g. loopback. */
 static BOOL sb_ifq_is_nic_tag(ULONG tag)
@@ -114,21 +123,13 @@ APTR bsd_ObtainInterfaceList(struct SocketBase *base asm("a6"))
             continue;
 
         /* one node per interface; the name string trails the node body,
-         * pointed to by ln_Name (the documented ObtainInterfaceList shape).
-         * The reported name is the Roadshow-style identity when the
-         * interface has one, else lwIP's short name. */
-        struct NetIfBase *nib = netstack.ns_ActiveIf;
-        BOOL named = nib != NULL && nif == &nib->nib_Netif && nib->nib_Name[0] != '\0';
-        ULONG nameMax = named ? NETCTL_IFNAME_MAX : NETIF_NAMESIZE;
-        struct Node *n = AllocVec(sizeof(struct Node) + nameMax,
+         * pointed to by ln_Name (the documented ObtainInterfaceList shape) */
+        struct Node *n = AllocVec(sizeof(struct Node) + NETCTL_IFNAME_MAX,
                                   MEMF_PUBLIC | MEMF_CLEAR);
         if (n == NULL)
             break;
         n->ln_Name = (char *)(n + 1);
-        if (named)
-            strlcpy(n->ln_Name, nib->nib_Name, nameMax);
-        else
-            netif_index_to_name(netif_get_index(nif), n->ln_Name);
+        sb_if_name(nif, n->ln_Name);
         AddTail(list, n);
     }
     netstack_unlock();
