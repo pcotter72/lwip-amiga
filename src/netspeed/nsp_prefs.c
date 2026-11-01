@@ -11,8 +11,10 @@
 #include <dos/dos.h>
 
 #include <proto/dos.h>
+#include <proto/exec.h>
 
-#include <prefs.h> /* emu68-common prefs_split() */
+#include <prefs.h>   /* emu68-common: the file */
+#include <strutil.h> /* emu68-common: strfit() */
 
 #define NSP_PREFS_ENV "ENV:" NSP_NAME ".prefs"
 #define NSP_PREFS_ENVARC "ENVARC:" NSP_NAME ".prefs"
@@ -116,25 +118,22 @@ void nsp_prefs_load(struct NspSettings *s)
 {
     nsp_prefs_defaults(s);
 
-    BPTR fh = Open((CONST_STRPTR)NSP_PREFS_ENV, MODE_OLDFILE);
-    if (fh == 0)
+    struct prefs_file f;
+    if (!prefs_open(&f, SysBase, NSP_PREFS_ENV))
         return;
 
-    char line[128];
-    while (FGets(fh, (STRPTR)line, sizeof(line)) != NULL)
+    char *key, *val;
+    while (prefs_next(&f, &key, &val))
     {
-        char *key, *val;
-        if (!prefs_split(line, &key, &val))
-            continue;
         LONG id = nsp_prefs_setting(key);
         if (id >= 0)
             nsp_prefs_parse_choice(s, (ULONG)id, val);
         else if (strcasecmp(key, "INTERFACE") == 0)
-            strlcpy(s->interface, val, NSP_NAME_MAX);
+            (void)strfit(s->interface, val, NSP_NAME_MAX);
         else if (strcasecmp(key, "WINDOW") == 0)
             s->haveBox = nsp_prefs_parse_box(val, &s->box);
     }
-    Close(fh);
+    prefs_close(&f);
 }
 
 /* --- save ----------------------------------------------------------------- */
