@@ -27,6 +27,16 @@ A compatibility release. Nothing to change in your configuration.
   reported if it arrived during the wait: with a socket already ready, or
   on a zero-timeout poll, it went unnoticed. One that arrived together
   with Ctrl-C was lost.
+- **A name too long for `ENV:netstack.prefs` is no longer cut short.** A
+  `HOSTNAME`, `DOMAIN`, `MDNS_SERVICE` or `NETWORK` name that does not fit is
+  refused with a warning in the log, since its first part would be a different
+  name. The default stays, or the entry is left out.
+- **`MDNS` also takes `true` and `false`,** like the switches in
+  `ENV:genet.prefs`.
+- **An `MDNS_SERVICE` port must be a number and nothing else:** `80x` is refused
+  with the usual warning.
+- **NetSpeed ignores a saved `INTERFACE` too long to hold,** rather than looking
+  for a shortened name.
 
 ---
 

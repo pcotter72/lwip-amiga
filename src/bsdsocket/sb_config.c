@@ -7,14 +7,6 @@
 
 #include "sb_base.h"
 
-#include <dos/dos.h>
-
-#ifdef __INTELLISENSE__
-#include <clib/dos_protos.h>
-#else
-#include <proto/dos.h>
-#endif
-
 #include <debug.h>
 #include <strutil.h>
 #include <prefs.h>
@@ -74,22 +66,6 @@ static BOOL sb_cfg_parse_netnum(const char *s, ULONG *out)
     return TRUE;
 }
 
-/* yes/no key: everything else leaves the default alone (and says so) */
-static BOOL sb_cfg_parse_bool(const char *s, BOOL *out)
-{
-    if (_Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "yes") == 0 ||
-        _Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "on") == 0 ||
-        _Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "1") == 0)
-        *out = TRUE;
-    else if (_Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "no") == 0 ||
-             _Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "off") == 0 ||
-             _Stricmp((CONST_STRPTR)s, (CONST_STRPTR) "0") == 0)
-        *out = FALSE;
-    else
-        return FALSE;
-    return TRUE;
-}
-
 static void sb_cfg_defaults(struct SbNetConfig *cfg)
 {
     for (ULONG i = 0; i < sizeof(*cfg); i++)
@@ -118,31 +94,15 @@ void sb_config_load(struct SbNetConfig *cfg)
 {
     sb_cfg_defaults(cfg);
 
-    /* dos packet I/O needs a Process (the stack task is one) */
-    if (FindTask(NULL)->tc_Node.ln_Type != NT_PROCESS)
+    struct prefs_file f;
+    if (!prefs_open(&f, SysBase, "ENV:netstack.prefs"))
         return;
-
-    struct DosLibrary *DOSBase =
-        (struct DosLibrary *)OpenLibrary((CONST_STRPTR) "dos.library", 36);
-    if (DOSBase == NULL)
-        return;
-
-    BPTR fh = Open((CONST_STRPTR) "ENV:netstack.prefs", MODE_OLDFILE);
-    if (fh == 0)
-    {
-        CloseLibrary((struct Library *)DOSBase);
-        return;
-    }
     KprintfT("[bsdsocket] %s: reading ENV:netstack.prefs\n", __func__);
 
     BOOL warnedObsolete = FALSE;
-    char linebuf[256];
-    while (FGets(fh, (STRPTR)linebuf, sizeof(linebuf)))
+    char *key, *val;
+    while (prefs_next(&f, &key, &val))
     {
-        char *key, *val;
-        if (!prefs_split(linebuf, &key, &val))
-            continue;
-
         if (sb_cfg_key_obsolete(key))
         {
             if (!warnedObsolete)
@@ -165,15 +125,17 @@ void sb_config_load(struct SbNetConfig *cfg)
         }
         else if (_Stricmp((CONST_STRPTR)key, (CONST_STRPTR) "HOSTNAME") == 0)
         {
-            strlcpy(cfg->cfg_Hostname, val, sizeof(cfg->cfg_Hostname));
+            if (!strfit(cfg->cfg_Hostname, val, sizeof(cfg->cfg_Hostname)))
+                SB_LOG(NS_LOG_WARNING, "netstack.prefs: HOSTNAME too long '%s'", val);
         }
         else if (_Stricmp((CONST_STRPTR)key, (CONST_STRPTR) "DOMAIN") == 0)
         {
-            strlcpy(cfg->cfg_Domain, val, sizeof(cfg->cfg_Domain));
+            if (!strfit(cfg->cfg_Domain, val, sizeof(cfg->cfg_Domain)))
+                SB_LOG(NS_LOG_WARNING, "netstack.prefs: DOMAIN too long '%s'", val);
         }
         else if (_Stricmp((CONST_STRPTR)key, (CONST_STRPTR) "MDNS") == 0)
         {
-            if (!sb_cfg_parse_bool(val, &cfg->cfg_Mdns))
+            if (!prefs_bool(val, &cfg->cfg_Mdns))
                 SB_LOG(NS_LOG_WARNING, "netstack.prefs: bad MDNS '%s'", val);
         }
         else if (_Stricmp((CONST_STRPTR)key, (CONST_STRPTR) "MDNS_SERVICE") == 0)
@@ -187,19 +149,21 @@ void sb_config_load(struct SbNetConfig *cfg)
             char *name = rest;
 
             LONG port;
-            if (*type == '\0' || !StrToLong((STRPTR)portStr, &port) || port <= 0 ||
-                port > 65535)
+            if (*type == '\0' || !prefs_number(portStr, 1, 65535, &port))
                 SB_LOG(NS_LOG_WARNING, "netstack.prefs: bad MDNS_SERVICE '%s'", type);
             else if (cfg->cfg_NumMdnsServices >= SB_CFG_MDNS_MAX)
                 SB_LOG(NS_LOG_WARNING, "netstack.prefs: MDNS_SERVICE table full (max %ld)",
                        (LONG)SB_CFG_MDNS_MAX);
             else
             {
-                struct SbCfgMdnsService *s =
-                    &cfg->cfg_MdnsServices[cfg->cfg_NumMdnsServices++];
-                strlcpy(s->type, type, sizeof(s->type));
-                strlcpy(s->name, name, sizeof(s->name));
-                s->port = (UWORD)port;
+                struct SbCfgMdnsService *s = &cfg->cfg_MdnsServices[cfg->cfg_NumMdnsServices];
+                if (strfit(s->type, type, sizeof(s->type)) && strfit(s->name, name, sizeof(s->name)))
+                {
+                    s->port = (UWORD)port;
+                    cfg->cfg_NumMdnsServices++;
+                }
+                else
+                    SB_LOG(NS_LOG_WARNING, "netstack.prefs: MDNS_SERVICE too long '%s'", type);
             }
         }
         else if (_Stricmp((CONST_STRPTR)key, (CONST_STRPTR) "NETWORK") == 0)
@@ -217,14 +181,18 @@ void sb_config_load(struct SbNetConfig *cfg)
                        (LONG)SB_CFG_NETWORKS_MAX);
             else
             {
-                struct SbCfgNetwork *n = &cfg->cfg_Networks[cfg->cfg_NumNetworks++];
-                strlcpy(n->name, name, sizeof(n->name));
-                n->net = netnum;
+                struct SbCfgNetwork *n = &cfg->cfg_Networks[cfg->cfg_NumNetworks];
+                if (strfit(n->name, name, sizeof(n->name)))
+                {
+                    n->net = netnum;
+                    cfg->cfg_NumNetworks++;
+                }
+                else
+                    SB_LOG(NS_LOG_WARNING, "netstack.prefs: NETWORK too long '%s'", name);
             }
         }
         /* unknown keys are ignored */
     }
 
-    Close(fh);
-    CloseLibrary((struct Library *)DOSBase);
+    prefs_close(&f);
 }
