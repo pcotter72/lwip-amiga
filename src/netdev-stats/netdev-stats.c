@@ -270,7 +270,7 @@ static BOOL view_open(struct view *v, struct IOStdReq *io, BOOL counters,
         if (err != 0)
         {
             printf("GET_STATS failed (%d)%s\n", err,
-                   err == NDERR_BADPARAMS ? " — size mismatch (rebuild driver+tool together)" : "");
+                   err == NDERR_BADPARAMS ? " -- size mismatch (rebuild driver+tool together)" : "");
             return FALSE;
         }
         v->vw_HaveLink =
@@ -291,7 +291,7 @@ static BOOL view_open(struct view *v, struct IOStdReq *io, BOOL counters,
         v->vw_PrevVals =
             AllocMem((ULONG)v->vw_Num * sizeof(*v->vw_PrevVals), MEMF_PUBLIC | MEMF_CLEAR);
         if (v->vw_PrevVals == NULL)
-            printf("(no memory for deltas — absolute values only)\n");
+            printf("(no memory for deltas -- absolute values only)\n");
     }
     return TRUE;
 }
@@ -398,7 +398,7 @@ static int run_coalesce(struct IOStdReq *io, struct NetDevCoalesce *coal)
     if (err != 0)
     {
         printf("SET_COALESCE failed (%d)%s\n", err,
-               err == NDERR_NOTATTACHED ? " — stack not attached" : "");
+               err == NDERR_NOTATTACHED ? " -- stack not attached" : "");
         return 10;
     }
     printf("coalesce set: rx %lu us / %u frames, tx %u frames\n",

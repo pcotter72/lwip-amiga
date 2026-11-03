@@ -394,7 +394,7 @@ static const char *ctl_error(LONG result)
     switch (result)
     {
     case MDNSCTL_ERR_VERSION:
-        return "control protocol mismatch — tool and library differ";
+        return "control protocol mismatch -- tool and library differ";
     case MDNSCTL_ERR_OP:
         return "unsupported operation";
     case MDNSCTL_ERR_PARAM:
@@ -434,7 +434,7 @@ static LONG ctl_call(struct MdnsCtlMsg *msg, UWORD op)
 
     if (port == NULL)
     {
-        fprintf(stderr, "mdns: %s is not published — is the stack up with MDNS=yes?\n",
+        fprintf(stderr, "mdns: %s is not published -- is the stack up with MDNS=yes?\n",
                 MDNSCTL_PORT_NAME);
         DeleteMsgPort(reply);
         return MDNSCTL_ERR_INACTIVE;
@@ -541,7 +541,7 @@ static int mdns_watch(ULONG secs)
 
 static void usage(void)
 {
-    printf("mdns — multicast DNS for the Amiga\n"
+    printf("mdns -- multicast DNS for the Amiga\n"
            "\n"
            "  mdns <name>                    resolve <name>.local on the LAN\n"
            "  mdns LISTEN [SECS <n>]         watch mDNS announcements (default %d s)\n"

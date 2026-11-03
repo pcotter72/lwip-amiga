@@ -385,7 +385,7 @@ int main(int argc, char **argv)
                "  udprx: the peer paces its stream to mbps (default %d); 0 = unpaced\n"
                "  line-rate flood, an overload test rather than a benchmark.\n"
                "  txblock = diagnostic: 1 blocking socket, tight send() loop, 32 KB\n"
-               "  default — reproduces AmiSpeedTest's upload path.\n"
+               "  default -- reproduces AmiSpeedTest's upload path.\n"
                "       sockbench rr|rrsel <host> [respBytes] [seconds] [reqBytes]\n"
                "  request/response latency: small request out, respBytes back, repeat.\n"
                "  respBytes takes K/M; 0 or omitted sweeps 1 byte..1M. Default 5 s per\n"

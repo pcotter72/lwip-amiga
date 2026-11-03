@@ -90,7 +90,7 @@ void netdevif_dma_free(struct NetdevIf *ndi, APTR ptr, ULONG size)
 {
     if (ndi == NULL)
     {
-        Kprintf("[netdevif] DMA free after detach — leaked %lu bytes\n", size);
+        Kprintf("[netdevif] DMA free after detach -- leaked %lu bytes\n", size);
         return;
     }
     ndi->ndi_Ops->ndo_DmaFree(ndi->ndi_Drv, ptr, size);

@@ -294,7 +294,7 @@ void netstack_free(void *ptr)
         if (netstack.ns_ActiveNetdev == NULL)
         {
             /* arena already returned at detach: do NOT touch the block */
-            Kprintf("[netstack] slab free after detach — leaked %lu bytes\n", size);
+            Kprintf("[netstack] slab free after detach -- leaked %lu bytes\n", size);
             return;
         }
 
