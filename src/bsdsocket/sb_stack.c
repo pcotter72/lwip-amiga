@@ -434,6 +434,7 @@ static void SbStackTask(void)
             {
                 statTick = 0;
                 sb_stats_kick(ctx);
+                sb_netctl_sweep(ctx); /* openers whose task is gone: stop signalling them */
                 sb_netctl_nudge(ctx); /* re-ask shutdown holdouts to leave */
             }
         }

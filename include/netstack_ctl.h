@@ -71,7 +71,10 @@
                                          DHCP lease) — it keeps trying in the
                                          background */
 #define NETCTL_ERR_ABORTED      (-11) /* SHUTDOWN reply after CANCEL_SHUTDOWN;
-                                         remaining client count in ncm_Count */
+                                         remaining client count in ncm_Count, of
+                                         them in ncm_Aux the clients whose task
+                                         is gone (ended without CloseLibrary; a
+                                         reboot clears those) */
 #define NETCTL_ERR_HWTYPE       (-12) /* ADD_IF: the SANA-II device is not
                                          48-bit Ethernet (wrong wire type) */
 

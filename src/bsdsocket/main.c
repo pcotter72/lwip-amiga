@@ -112,6 +112,7 @@ static struct Library *LibInit(struct Library *base asm("d0"), ULONG seglist asm
     root->stackTask = NULL;
     root->sockPool = NULL;
     root->openCount = 0;
+    root->deadOpeners = 0;
     root->shuttingDown = FALSE;
     root->nextSockId = 1;
     root->defaultDomain[0] = '\0';
@@ -213,6 +214,16 @@ struct SocketBase *LibOpen(ULONG version asm("d0"), struct SocketBase *base asm(
     b->libNode.lib_Flags &= (UBYTE)~LIBF_DELEXP;
 
     b->task = FindTask(NULL);
+    b->taskSPLower = b->task->tc_SPLower;
+    b->taskSPUpper = b->task->tc_SPUpper;
+    {
+        const char *name = b->task->tc_Node.ln_Name;
+        ULONG i = 0;
+        if (name != NULL)
+            for (; i < sizeof(b->taskName) - 1 && name[i] != '\0'; i++)
+                b->taskName[i] = name[i];
+        b->taskName[i] = '\0';
+    }
     b->sigBit = AllocSignal(-1);
     b->breakMask = SIGBREAKF_CTRL_C;
     b->sigIoMask = 0;

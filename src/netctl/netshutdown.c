@@ -149,9 +149,17 @@ int main(void)
 
     case NETCTL_ERR_ABORTED:
         if (!quiet)
-            printf("%s; the network keeps running (%lu client(s) still active).\n",
+        {
+            printf("%s; the network keeps running (%lu client(s) still active",
                    broke ? "stopped waiting" : "timeout",
                    (unsigned long)msg.ncm_Count);
+            /* ncm_Aux: openers whose program ended without closing the library
+             * (0 from a library that does not count them) */
+            if (msg.ncm_Aux > 0)
+                printf(", %ld of them ended without closing the library - a reboot clears those",
+                       (long)msg.ncm_Aux);
+            printf(").\n");
+        }
         rc = RETURN_WARN;
         break;
 
