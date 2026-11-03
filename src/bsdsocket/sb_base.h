@@ -653,6 +653,8 @@ struct SocketBase
                          * clients; LibClose of the last one signals the
                          * stack task (SIGBREAKF_CTRL_E). Under openLock. */
     UBYTE pad3[3];
+    ULONG deadOpeners;  /* openers whose task is gone (exited without CloseLibrary):
+                         * never signalled again, still counted as open. Under openLock. */
     struct MinList releasedSockets; /* ReleaseSocket parking lot (core lock) */
     LONG nextSockId;    /* ReleaseSocket UNIQUE_ID allocator; wraps to 1 rather
                          * than going negative, and skips ids still parked */
@@ -700,7 +702,15 @@ struct SocketBase
 
     /* --- per-opener state (child bases; garbage in the root) --- */
     struct MinNode openNode; /* link in root->openers (under openLock) */
-    struct Task *task;  /* the opener; the Signal() target of every wake */
+    struct Task *task;  /* the opener; the Signal() target of every wake. NULL once the
+                         * task was found gone (sb_netctl_sweep): nothing may Signal it */
+    APTR taskSPLower;   /* the opener task's stack bounds at LibOpen: with the Task
+                         * pointer they tell the opener from another task that reuses
+                         * its address (AmigaOS 3.x has no task id). StackSwap moves
+                         * them for a while, so a mismatch only skips one signal */
+    APTR taskSPUpper;
+    char taskName[32];  /* the opener task's name at LibOpen, for the log: the task's
+                         * own ln_Name memory is gone by the time its death is seen */
     BYTE sigBit;        /* the wait bit of the header's blocking pattern; -1 if AllocSignal failed */
     UBYTE pad0[3];
     ULONG breakMask;    /* SBTC_BREAKMASK; aborts a blocking call with SB_EINTR (default SIGBREAKF_CTRL_C) */

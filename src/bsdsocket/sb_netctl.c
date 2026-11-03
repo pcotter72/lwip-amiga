@@ -293,6 +293,82 @@ static LONG sb_netctl_rem(struct SbStackCtx *ctx, struct NetCtlMsg *msg)
     return NETCTL_OK;
 }
 
+/* --- opener liveness --------------------------------------------------------
+ *
+ * A program that ends without CloseLibrary() (killed, crashed, or a C runtime
+ * that exits on Ctrl-C before the close) leaves its child base registered
+ * with a Task pointer to freed memory. Every Signal() to it afterwards writes
+ * into that memory; if the dead task's last Wait() mask is still there,
+ * Signal() even relinks its node into the ready list. And once the memory is
+ * reused by a new task, the shutdown nudge delivers the opener's break mask
+ * (Ctrl-C by default) to a program that never opened the library.
+ *
+ * AmigaOS 3.x has no task identity beyond the pointer, so two checks:
+ * SB_OPENER_GONE - the pointer is in none of exec's task lists: the task is
+ *   gone for certain. The opener is marked dead (task = NULL) for good.
+ * SB_OPENER_OTHER - a task lives at the address but its stack bounds or
+ *   its signal allocation do not match the opener's: another task reused
+ *   the address, or the opener is inside StackSwap() right now. Not
+ *   signalled this time, not marked (the StackSwap case comes back).
+ * The lists are walked under Disable(): an interrupt's Signal() moves tasks
+ * between TaskWait and TaskReady. */
+#define SB_OPENER_ALIVE 0
+#define SB_OPENER_GONE  1
+#define SB_OPENER_OTHER 2
+
+static int sb_opener_check(const struct SocketBase *b)
+{
+    const struct Task *t = b->task;
+    int res = SB_OPENER_GONE;
+
+    Disable();
+    BOOL present = (const struct Task *)SysBase->ThisTask == t;
+    for (const struct Node *n = SysBase->TaskReady.lh_Head; !present && n->ln_Succ != NULL;
+         n = n->ln_Succ)
+        present = (const struct Task *)n == t;
+    for (const struct Node *n = SysBase->TaskWait.lh_Head; !present && n->ln_Succ != NULL;
+         n = n->ln_Succ)
+        present = (const struct Task *)n == t;
+    if (present)
+        res = (t->tc_SPLower == b->taskSPLower && t->tc_SPUpper == b->taskSPUpper &&
+               b->sigBit >= 0 && (t->tc_SigAlloc & (1UL << b->sigBit)) != 0)
+                  ? SB_OPENER_ALIVE
+                  : SB_OPENER_OTHER;
+    Enable();
+    return res;
+}
+
+/* Under openLock. The base stays registered and counted (its sockets and
+ * resources belong to a task that no longer exists; only a reboot clears
+ * it), but nothing signals it any more, and a log hook it installed is
+ * retracted as CloseLibrary would have. */
+static void sb_opener_mark_dead(struct SocketBase *root, struct SocketBase *b)
+{
+    b->task = NULL;
+    root->deadOpeners++;
+    sb_log_owner_closed(root, b);
+    SB_LOG(NS_LOG_WARNING, "client '%s' ended without closing the library: its hold "
+                           "stays until a reboot, it is no longer signalled",
+           b->taskName);
+}
+
+/* Once a second from the stack task, shutdown pending or not: a dead opener
+ * is found before its Task memory is reused, and sb_wake() and the DNS
+ * callbacks stop signalling it. */
+void sb_netctl_sweep(struct SbStackCtx *ctx)
+{
+    struct SocketBase *root = ctx->root;
+    ObtainSemaphore(&root->openLock);
+    for (struct MinNode *n = root->openers.mlh_Head; n->mln_Succ != NULL;
+         n = n->mln_Succ)
+    {
+        struct SocketBase *b = SB_OPENER_FROM_NODE(n);
+        if (b->task != NULL && sb_opener_check(b) == SB_OPENER_GONE)
+            sb_opener_mark_dead(root, b);
+    }
+    ReleaseSemaphore(&root->openLock);
+}
+
 /* Ask every registered opener to let go: Signal each with its configured
  * break mask (SBTC_BREAKMASK, default SIGBREAKF_CTRL_C) so blocking calls
  * return SB_EINTR and well-behaved clients exit. Under openLock. */
@@ -302,8 +378,21 @@ static void sb_netctl_nudge_openers(struct SocketBase *root)
          n = n->mln_Succ)
     {
         struct SocketBase *b = SB_OPENER_FROM_NODE(n);
-        if (b->task != NULL && b->breakMask != 0)
+        if (b->task == NULL || b->breakMask == 0)
+            continue;
+        switch (sb_opener_check(b))
+        {
+        case SB_OPENER_ALIVE:
             Signal(b->task, b->breakMask);
+            break;
+        case SB_OPENER_GONE:
+            sb_opener_mark_dead(root, b);
+            break;
+        default: /* SB_OPENER_OTHER: not our opener right now, maybe never again */
+            Kprintf("[bsdsocket] %s: task 0x%08lx is not opener '%s' any more, not signalled\n",
+                    __func__, (ULONG)b->task, (ULONG)b->taskName);
+            break;
+        }
     }
 }
 
@@ -316,7 +405,12 @@ static LONG sb_netctl_shutdown(struct SbStackCtx *ctx, struct NetCtlMsg *msg)
     ObtainSemaphore(&root->openLock);
     root->shuttingDown = TRUE; /* LibOpen refuses new clients from here on */
     sb_netctl_nudge_openers(root);
-    SB_LOG(NS_LOG_NOTICE, "shutdown requested, asking %lu client(s) to quit", root->openCount);
+    if (root->deadOpeners != 0)
+        SB_LOG(NS_LOG_NOTICE, "shutdown requested, asking %lu client(s) to quit (%lu of them "
+                              "ended without closing the library: a reboot clears those)",
+               root->openCount, root->deadOpeners);
+    else
+        SB_LOG(NS_LOG_NOTICE, "shutdown requested, asking %lu client(s) to quit", root->openCount);
     ReleaseSemaphore(&root->openLock);
 
     /* Parked until the last client closes (LibClose signals CTRL_E; the
@@ -335,13 +429,15 @@ static LONG sb_netctl_cancel_shutdown(struct SbStackCtx *ctx)
     ObtainSemaphore(&root->openLock);
     root->shuttingDown = FALSE;
     ULONG clients = root->openCount;
+    ULONG dead = root->deadOpeners;
     ReleaseSemaphore(&root->openLock);
 
     ctx->pendingShutdown->ncm_Result = NETCTL_ERR_ABORTED;
     ctx->pendingShutdown->ncm_Count = clients;
+    ctx->pendingShutdown->ncm_Aux = (LONG)dead; /* of them: dead openers (a reboot clears those) */
     ReplyMsg(&ctx->pendingShutdown->ncm_Msg);
     ctx->pendingShutdown = NULL;
-    SB_LOG(NS_LOG_NOTICE, "shutdown cancelled, %lu client(s) remain", clients);
+    SB_LOG(NS_LOG_NOTICE, "shutdown cancelled, %lu client(s) remain (%lu dead)", clients, dead);
     return NETCTL_OK;
 }
 

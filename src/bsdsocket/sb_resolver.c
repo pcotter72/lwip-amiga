@@ -32,7 +32,8 @@ static void sb_dns_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
         base->dnsErr = SB_HOST_NOT_FOUND;
     }
     base->dnsDone = TRUE;
-    Signal(base->task, 1UL << base->sigBit);
+    if (base->task != NULL) /* NULL: the opener ended without closing the library */
+        Signal(base->task, 1UL << base->sigBit);
 }
 
 static struct sb_hostent *sb_host_fill(struct SocketBase *base, const char *name, ULONG addr)
