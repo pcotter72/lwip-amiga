@@ -206,6 +206,7 @@ LONG sb_wait_to(struct SocketBase *base, ULONG ms, struct SbTimedWait *tw)
     tr->tr_node.io_Command = TR_ADDREQUEST;
     tr->tr_time.tv_secs = left / 1000;
     tr->tr_time.tv_micro = (left % 1000) * 1000;
+    base->timerArmed = TRUE; /* for sb_opener_reap, should this task die in here */
     SendIO(&tr->tr_node);
 
     ULONG timerBit = 1UL << base->timerPort->mp_SigBit;
@@ -216,6 +217,7 @@ LONG sb_wait_to(struct SocketBase *base, ULONG ms, struct SbTimedWait *tw)
     if (CheckIO(&tr->tr_node) == NULL)
         AbortIO(&tr->tr_node);
     WaitIO(&tr->tr_node);
+    base->timerArmed = FALSE;
     SetSignal(0UL, timerBit);
     netstack_lock();
 

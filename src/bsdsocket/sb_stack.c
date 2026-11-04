@@ -419,6 +419,11 @@ static void SbStackTask(void)
             /* answer a parked AddNetInterface once its DHCP lease is bound */
             sb_netctl_tick(ctx);
 
+            /* openers whose task is gone: stop signalling them, release what
+             * they held. Every tick, so that a dead task's memory is found
+             * before another task gets it (one Disable'd list walk per opener) */
+            sb_netctl_sweep(ctx);
+
             /* push any pending multicast filter change (devIO must be idle) */
             sb_rxfilter_sync(ctx);
 
@@ -434,7 +439,6 @@ static void SbStackTask(void)
             {
                 statTick = 0;
                 sb_stats_kick(ctx);
-                sb_netctl_sweep(ctx); /* openers whose task is gone: stop signalling them */
                 sb_netctl_nudge(ctx); /* re-ask shutdown holdouts to leave */
             }
         }

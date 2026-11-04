@@ -338,40 +338,106 @@ static int sb_opener_check(const struct SocketBase *b)
     return res;
 }
 
-/* Under openLock. The base stays registered and counted (its sockets and
- * resources belong to a task that no longer exists; only a reboot clears
- * it), but nothing signals it any more, and a log hook it installed is
- * retracted as CloseLibrary would have. */
+/* Under openLock. From here on nothing signals the base: task is NULL, and
+ * its timer port stops signalling too (PA_IGNORE: a timer request of the
+ * dead task that expires or is aborted is just queued, timer.device's
+ * ReplyMsg would otherwise Signal the dead - or reused - task through the
+ * port). A log hook it installed is retracted as CloseLibrary would have.
+ * The base stays registered and counted until sb_opener_reap releases it. */
 static void sb_opener_mark_dead(struct SocketBase *root, struct SocketBase *b)
 {
     b->task = NULL;
+    if (b->timerPort != NULL)
+        b->timerPort->mp_Flags = PA_IGNORE;
     root->deadOpeners++;
     sb_log_owner_closed(root, b);
-    SB_LOG(NS_LOG_WARNING, "client '%s' ended without closing the library: its hold "
-                           "stays until a reboot, it is no longer signalled",
+    SB_LOG(NS_LOG_WARNING, "client '%s' ended without closing the library: releasing what it held",
            b->taskName);
 }
 
-/* Once a second from the stack task, shutdown pending or not: a dead opener
- * is found before its Task memory is reused, and sb_wake() and the DNS
- * callbacks stop signalling it. */
+/* Stack task, under openLock, for a base whose task is gone (task == NULL):
+ * do what the opener's own CloseLibrary would have done, from here. Returns
+ * FALSE when it has to wait for the next sweep: a DNS callback is still
+ * owed to the base (lwIP delivers it within DNS_MAX_RETRIES seconds, with
+ * NULL at worst), or its timer request did not come back from the abort
+ * yet. The base memory is freed only when nothing can reach it any more.
+ * The signal bits of the dead task are not freed (they died with it: a
+ * FreeSignal here would clear bits of THIS task). LibExpunge is never run
+ * from here - the stack task lives in this code; exec calls it later. */
+static BOOL sb_opener_reap(struct SocketBase *root, struct SocketBase *b)
+{
+    netstack_lock();
+    UBYTE dnsPending = b->dnsPending; /* the callback runs on this task, under the lock */
+    netstack_unlock();
+    if (dnsPending != 0)
+        return FALSE;
+
+    if (b->timerArmed)
+    {
+        if (CheckIO(&b->timerReq->tr_node) == NULL)
+            AbortIO(&b->timerReq->tr_node);
+        if (CheckIO(&b->timerReq->tr_node) == NULL)
+            return FALSE; /* still with timer.device; it replies to the ignored port */
+        WaitIO(&b->timerReq->tr_node); /* complete: only unlinks the reply, no Wait */
+        b->timerArmed = FALSE;
+    }
+
+    ULONG sockets = 0;
+    if (b->fd != NULL)
+        for (ULONG i = 0; i < b->fdCount; i++)
+            if (b->fd[i] != NULL)
+                sockets++;
+
+    sb_child_cleanup(b, FALSE);
+
+    Remove((struct Node *)&b->openNode);
+    root->libNode.lib_OpenCnt--;
+    root->openCount--;
+    root->deadOpeners--;
+    root->releasedOpeners++;
+    SB_LOG(NS_LOG_NOTICE, "client '%s' released: %lu socket(s) closed, %lu client(s) remain",
+           b->taskName, sockets, root->openCount);
+
+    ULONG negSize = b->libNode.lib_NegSize;
+    ULONG posSize = b->libNode.lib_PosSize;
+    FreeMem((UBYTE *)b - negSize, negSize + posSize);
+    return TRUE;
+}
+
+/* Under openLock, stack task. Every pass: an opener whose task is gone is
+ * marked (nothing signals it from then on) and released (its sockets
+ * closed, its memory freed, the open count down) - or, when something is
+ * still owed to it, released on a later pass. Runs on every stack tick
+ * (NETSTACK_TICK_MS), so a dead task's memory is rarely reused before the
+ * opener is found; nothing of a present task is touched. */
+static void sb_netctl_sweep_openers(struct SocketBase *root)
+{
+    struct MinNode *n = root->openers.mlh_Head;
+    while (n->mln_Succ != NULL)
+    {
+        struct MinNode *next = n->mln_Succ; /* the body may unlink n */
+        struct SocketBase *b = SB_OPENER_FROM_NODE(n);
+        if (b->task != NULL && sb_opener_check(b) == SB_OPENER_GONE)
+            sb_opener_mark_dead(root, b);
+        if (b->task == NULL)
+            sb_opener_reap(root, b);
+        n = next;
+    }
+}
+
 void sb_netctl_sweep(struct SbStackCtx *ctx)
 {
     struct SocketBase *root = ctx->root;
     ObtainSemaphore(&root->openLock);
-    for (struct MinNode *n = root->openers.mlh_Head; n->mln_Succ != NULL;
-         n = n->mln_Succ)
-    {
-        struct SocketBase *b = SB_OPENER_FROM_NODE(n);
-        if (b->task != NULL && sb_opener_check(b) == SB_OPENER_GONE)
-            sb_opener_mark_dead(root, b);
-    }
+    sb_netctl_sweep_openers(root);
     ReleaseSemaphore(&root->openLock);
 }
 
 /* Ask every registered opener to let go: Signal each with its configured
  * break mask (SBTC_BREAKMASK, default SIGBREAKF_CTRL_C) so blocking calls
- * return SB_EINTR and well-behaved clients exit. Under openLock. */
+ * return SB_EINTR and well-behaved clients exit. Under openLock, after a
+ * sweep (a dead opener is never signalled, nor one whose task address
+ * another task has taken). */
 static void sb_netctl_nudge_openers(struct SocketBase *root)
 {
     for (struct MinNode *n = root->openers.mlh_Head; n->mln_Succ != NULL;
@@ -380,19 +446,11 @@ static void sb_netctl_nudge_openers(struct SocketBase *root)
         struct SocketBase *b = SB_OPENER_FROM_NODE(n);
         if (b->task == NULL || b->breakMask == 0)
             continue;
-        switch (sb_opener_check(b))
-        {
-        case SB_OPENER_ALIVE:
+        if (sb_opener_check(b) == SB_OPENER_ALIVE)
             Signal(b->task, b->breakMask);
-            break;
-        case SB_OPENER_GONE:
-            sb_opener_mark_dead(root, b);
-            break;
-        default: /* SB_OPENER_OTHER: not our opener right now, maybe never again */
+        else /* SB_OPENER_OTHER: not our opener right now, maybe never again */
             Kprintf("[bsdsocket] %s: task 0x%08lx is not opener '%s' any more, not signalled\n",
                     __func__, (ULONG)b->task, (ULONG)b->taskName);
-            break;
-        }
     }
 }
 
@@ -404,10 +462,11 @@ static LONG sb_netctl_shutdown(struct SbStackCtx *ctx, struct NetCtlMsg *msg)
     struct SocketBase *root = ctx->root;
     ObtainSemaphore(&root->openLock);
     root->shuttingDown = TRUE; /* LibOpen refuses new clients from here on */
+    sb_netctl_sweep_openers(root); /* a client that is already gone is released now */
     sb_netctl_nudge_openers(root);
     if (root->deadOpeners != 0)
         SB_LOG(NS_LOG_NOTICE, "shutdown requested, asking %lu client(s) to quit (%lu of them "
-                              "ended without closing the library: a reboot clears those)",
+                              "ended without closing the library, not released yet)",
                root->openCount, root->deadOpeners);
     else
         SB_LOG(NS_LOG_NOTICE, "shutdown requested, asking %lu client(s) to quit", root->openCount);
@@ -434,7 +493,7 @@ static LONG sb_netctl_cancel_shutdown(struct SbStackCtx *ctx)
 
     ctx->pendingShutdown->ncm_Result = NETCTL_ERR_ABORTED;
     ctx->pendingShutdown->ncm_Count = clients;
-    ctx->pendingShutdown->ncm_Aux = (LONG)dead; /* of them: dead openers (a reboot clears those) */
+    ctx->pendingShutdown->ncm_Aux = (LONG)dead; /* of them: dead openers not released yet */
     ReplyMsg(&ctx->pendingShutdown->ncm_Msg);
     ctx->pendingShutdown = NULL;
     SB_LOG(NS_LOG_NOTICE, "shutdown cancelled, %lu client(s) remain (%lu dead)", clients, dead);
@@ -463,7 +522,10 @@ void sb_netctl_nudge(struct SbStackCtx *ctx)
     struct SocketBase *root = ctx->root;
     ObtainSemaphore(&root->openLock);
     if (root->shuttingDown)
+    {
+        sb_netctl_sweep_openers(root);
         sb_netctl_nudge_openers(root);
+    }
     ReleaseSemaphore(&root->openLock);
 }
 

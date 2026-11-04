@@ -39,8 +39,10 @@ BOOL sb_netctl_shutdown_ready(struct SbStackCtx *ctx);
  * break masks (a mid-Wait client may have eaten the first signal). */
 void sb_netctl_nudge(struct SbStackCtx *ctx);
 
-/* 1 Hz always: mark openers whose task is gone (ended without CloseLibrary)
- * so that nothing signals their freed Task memory. */
+/* Every stack tick: an opener whose task is gone (ended without
+ * CloseLibrary) is marked - nothing signals its freed Task memory - and its
+ * resources are released as its CloseLibrary would have (sockets closed,
+ * base freed, open count down), so it no longer holds the stack. */
 void sb_netctl_sweep(struct SbStackCtx *ctx);
 
 #endif /* SB_NETCTL_H */

@@ -653,8 +653,12 @@ struct SocketBase
                          * clients; LibClose of the last one signals the
                          * stack task (SIGBREAKF_CTRL_E). Under openLock. */
     UBYTE pad3[3];
-    ULONG deadOpeners;  /* openers whose task is gone (exited without CloseLibrary):
-                         * never signalled again, still counted as open. Under openLock. */
+    ULONG deadOpeners;  /* openers whose task is gone (exited without CloseLibrary) and
+                         * whose resources are not released yet (a DNS query or a timer
+                         * request of theirs is still outstanding): never signalled
+                         * again, still counted as open. Under openLock. */
+    ULONG releasedOpeners; /* openers whose task was gone and whose resources the stack
+                            * task released (sb_opener_reap); for the log. Under openLock. */
     struct MinList releasedSockets; /* ReleaseSocket parking lot (core lock) */
     LONG nextSockId;    /* ReleaseSocket UNIQUE_ID allocator; wraps to 1 rather
                          * than going negative, and skips ids still parked */
@@ -712,7 +716,11 @@ struct SocketBase
     char taskName[32];  /* the opener task's name at LibOpen, for the log: the task's
                          * own ln_Name memory is gone by the time its death is seen */
     BYTE sigBit;        /* the wait bit of the header's blocking pattern; -1 if AllocSignal failed */
-    UBYTE pad0[3];
+    UBYTE dnsPending;   /* dns_gethostbyname() callbacks still to come for this base (core
+                         * lock): the base must not be freed while one is outstanding */
+    UBYTE timerArmed;   /* a timerReq is out (SendIO without its WaitIO yet); set and cleared
+                         * by the opener task, read by the stack task when the opener is gone */
+    UBYTE pad0;
     ULONG breakMask;    /* SBTC_BREAKMASK; aborts a blocking call with SB_EINTR (default SIGBREAKF_CTRL_C) */
     ULONG sigIoMask;    /* SBTC_SIGIOMASK; async SIGIO, delivered on every readiness change (see sb_wake) */
     ULONG sigUrgMask;   /* SBTC_SIGURGMASK; SIGURG, delivered when an urgent mark arrives (sb_wake_urg) */
@@ -736,7 +744,10 @@ struct SocketBase
     struct SbSocket **fd; /* fdCount entries; grown via SBTC_DTABLESIZE */
     ULONG fdCount;        /* SB_FD_COUNT..SB_FD_MAX */
 
-    struct MsgPort *timerPort;   /* WaitSelect and SO_SNDTIMEO/SO_RCVTIMEO deadlines */
+    struct MsgPort *timerPort;   /* WaitSelect and SO_SNDTIMEO/SO_RCVTIMEO deadlines. Made by
+                                  * hand (sb_port_create), not CreateMsgPort(): when the opener
+                                  * task is gone its signal bit died with it, and the port memory
+                                  * must then be freed from another task without FreeSignal() */
     struct timerequest *timerReq; /* UNIT_MICROHZ; one request, reused per blocking call */
     UBYTE timerOpen;   /* timer.device opened; FALSE => sb_wait_to falls back to blocking forever */
     UBYTE dnsDone;     /* handshake cell: the resolver callback sets it, then signals sigBit */
@@ -794,6 +805,17 @@ static inline void sb_rx_awaiting(struct SocketBase *base)
 /* ==========================================================================
  * 3. INTERNAL PROTOTYPES, BY CONCERN
  * ========================================================================== */
+
+/* --- child base teardown (main.c) ---------------------------------------- */
+
+/* Free what a child base owns besides its own memory: its sockets (core
+ * lock taken here), the timer request and device, the timer port, the fd
+ * table. ownerAlive: called by the opener task itself (LibClose, a failed
+ * LibOpen) - its signal bits are freed too. !ownerAlive: called by the stack
+ * task for an opener whose task is gone (sb_opener_reap): the bits belonged
+ * to that task and died with it, nothing of exec's per-task state is touched.
+ * The caller makes sure no timer request is outstanding first. */
+void sb_child_cleanup(struct SocketBase *b, BOOL ownerAlive);
 
 /* --- errno plumbing (sb_errno.c) ----------------------------------------- */
 

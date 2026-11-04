@@ -32,6 +32,8 @@ static void sb_dns_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
         base->dnsErr = SB_HOST_NOT_FOUND;
     }
     base->dnsDone = TRUE;
+    if (base->dnsPending != 0)
+        base->dnsPending--; /* this base may be freed once no callback is owed */
     if (base->task != NULL) /* NULL: the opener ended without closing the library */
         Signal(base->task, 1UL << base->sigBit);
 }
@@ -65,6 +67,10 @@ static LONG sb_dns_query(struct SocketBase *base, const char *name, ULONG *addr)
     err_t r = dns_gethostbyname(name, &base->dnsAddr, sb_dns_cb, base);
     if (r == ERR_INPROGRESS)
     {
+        /* lwIP calls sb_dns_cb for every queued request, with the answer or
+         * with NULL after its retries (dns_call_found): the count goes back
+         * down even when this task gives up waiting below */
+        base->dnsPending++;
         while (!base->dnsDone)
         {
             LONG we = sb_wait(base);

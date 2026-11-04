@@ -154,9 +154,11 @@ int main(void)
                    broke ? "stopped waiting" : "timeout",
                    (unsigned long)msg.ncm_Count);
             /* ncm_Aux: openers whose program ended without closing the library
-             * (0 from a library that does not count them) */
+             * and whose resources the stack could not release yet (0 from a
+             * library that does not count them; a library that releases them
+             * reports 0 as soon as that is done, usually within seconds) */
             if (msg.ncm_Aux > 0)
-                printf(", %ld of them ended without closing the library - a reboot clears those",
+                printf(", %ld of them ended without closing the library and could not be released yet",
                        (long)msg.ncm_Aux);
             printf(").\n");
         }

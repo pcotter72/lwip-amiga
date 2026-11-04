@@ -139,6 +139,7 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
             base->timerReq->tr_node.io_Command = TR_ADDREQUEST;
             base->timerReq->tr_time.tv_secs = tv->tv_secs;
             base->timerReq->tr_time.tv_micro = tv->tv_micro;
+            base->timerArmed = TRUE; /* for sb_opener_reap, should this task die in here */
             SendIO(&base->timerReq->tr_node);
             timerArmed = TRUE;
         }
@@ -167,6 +168,7 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
             {
                 AbortIO(&base->timerReq->tr_node);
                 WaitIO(&base->timerReq->tr_node);
+                base->timerArmed = FALSE;
                 /* the reply may have landed after Wait(): a stale port
                  * signal would fake an instant timeout on the next timed
                  * wait using this port */
@@ -183,6 +185,7 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
         if (timerArmed && (sigs & timerBit))
         {
             WaitIO(&base->timerReq->tr_node);
+            base->timerArmed = FALSE;
             timerArmed = FALSE;
             timedOut = TRUE;
         }
@@ -193,6 +196,7 @@ LONG bsd_WaitSelect(LONG nfds asm("d0"), APTR readfds asm("a0"), APTR writefds a
     {
         AbortIO(&base->timerReq->tr_node);
         WaitIO(&base->timerReq->tr_node);
+        base->timerArmed = FALSE;
         SetSignal(0UL, 1UL << base->timerPort->mp_SigBit);
     }
 

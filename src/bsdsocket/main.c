@@ -113,6 +113,7 @@ static struct Library *LibInit(struct Library *base asm("d0"), ULONG seglist asm
     root->sockPool = NULL;
     root->openCount = 0;
     root->deadOpeners = 0;
+    root->releasedOpeners = 0;
     root->shuttingDown = FALSE;
     root->nextSockId = 1;
     root->defaultDomain[0] = '\0';
@@ -125,9 +126,44 @@ static struct Library *LibInit(struct Library *base asm("d0"), ULONG seglist asm
     return base;
 }
 
-static void child_cleanup(struct SocketBase *b)
+/* The opener's timer reply port, set up by hand as amiga.lib's CreatePort()
+ * does (RKRM Libraries, "Creating a Message Port"): a signal bit of the
+ * calling task, the MsgPort structure, PA_SIGNAL to that task. Not
+ * CreateMsgPort(): DeleteMsgPort() frees the signal bit of the CALLING task,
+ * and the port of an opener whose task is gone has to be freed by the stack
+ * task (sb_opener_reap) - then only the memory goes, the bit died with the
+ * task (sb_port_free with sigAlive == FALSE). */
+static struct MsgPort *sb_port_create(void)
 {
-    KprintfT("[bsdsocket] %s: base 0x%08lx\n", __func__, (ULONG)b);
+    BYTE sigBit = AllocSignal(-1);
+    if (sigBit == -1)
+        return NULL;
+    struct MsgPort *mp = AllocMem(sizeof(struct MsgPort), MEMF_PUBLIC | MEMF_CLEAR);
+    if (mp == NULL)
+    {
+        FreeSignal(sigBit);
+        return NULL;
+    }
+    mp->mp_Node.ln_Type = NT_MSGPORT;
+    mp->mp_Flags = PA_SIGNAL;
+    mp->mp_SigBit = (UBYTE)sigBit;
+    mp->mp_SigTask = FindTask(NULL);
+    mp->mp_MsgList.lh_Head = (struct Node *)&mp->mp_MsgList.lh_Tail;
+    mp->mp_MsgList.lh_Tail = NULL;
+    mp->mp_MsgList.lh_TailPred = (struct Node *)&mp->mp_MsgList.lh_Head;
+    return mp;
+}
+
+static void sb_port_free(struct MsgPort *mp, BOOL sigAlive)
+{
+    if (sigAlive)
+        FreeSignal(mp->mp_SigBit);
+    FreeMem(mp, sizeof(struct MsgPort));
+}
+
+void sb_child_cleanup(struct SocketBase *b, BOOL ownerAlive)
+{
+    KprintfT("[bsdsocket] %s: base 0x%08lx alive=%ld\n", __func__, (ULONG)b, (LONG)ownerAlive);
     if (b->fd != NULL)
     {
         /* orphaned sockets die with the base */
@@ -157,12 +193,13 @@ static void child_cleanup(struct SocketBase *b)
     }
     if (b->timerPort != NULL)
     {
-        DeleteMsgPort(b->timerPort);
+        sb_port_free(b->timerPort, ownerAlive);
         b->timerPort = NULL;
     }
     if (b->sigBit != -1)
     {
-        FreeSignal(b->sigBit);
+        if (ownerAlive)
+            FreeSignal(b->sigBit);
         b->sigBit = -1;
     }
 }
@@ -238,10 +275,14 @@ struct SocketBase *LibOpen(ULONG version asm("d0"), struct SocketBase *base asm(
     b->logTagPtr = NULL;
     b->logFacility = SB_LOG_USER;
     b->logMask = SB_LOGMASK_ALL;
-    b->timerPort = CreateMsgPort();
-    b->timerReq = (struct timerequest *)CreateIORequest(b->timerPort, sizeof(struct timerequest));
+    b->timerPort = sb_port_create();
+    b->timerReq = b->timerPort != NULL
+                      ? (struct timerequest *)CreateIORequest(b->timerPort, sizeof(struct timerequest))
+                      : NULL;
     b->timerOpen = FALSE;
+    b->timerArmed = FALSE;
     b->dnsDone = FALSE;
+    b->dnsPending = 0;
     b->fdCount = SB_FD_COUNT;
     b->fd = AllocMem(b->fdCount * sizeof(struct SbSocket *), MEMF_PUBLIC | MEMF_CLEAR);
 
@@ -251,7 +292,7 @@ struct SocketBase *LibOpen(ULONG version asm("d0"), struct SocketBase *base asm(
 
     if (b->sigBit == -1 || b->fd == NULL || !b->timerOpen)
     {
-        child_cleanup(b);
+        sb_child_cleanup(b, TRUE);
         FreeMem(mem, negSize + posSize);
         ReleaseSemaphore(&root->openLock);
         return NULL;
@@ -279,7 +320,7 @@ ULONG LibClose(struct SocketBase *base asm("a6"))
 
     /* a log hook this opener installed and never cleared dies with it */
     sb_log_owner_closed(root, base);
-    child_cleanup(base);
+    sb_child_cleanup(base, TRUE);
 
     /* Deregister BEFORE the base is freed (it holds the openers link), and
      * only then free the memory. When the last client of a pending
