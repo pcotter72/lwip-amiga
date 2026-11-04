@@ -90,9 +90,15 @@ static LONG sb_dns_query(struct SocketBase *base, const char *name, ULONG *addr)
             LONG we = sb_wait(base);
             if (we != 0)
             {
-                /* give the ticket to the callback, which frees it */
-                t->base = NULL;
+                /* sb_wait reports the break even when the answer's signal came
+                 * in the same Wait: if the callback has already run it will not
+                 * run again and the ticket is ours to free; otherwise give it to
+                 * the callback, which frees it */
                 base->dnsTicket = NULL;
+                if (t->done)
+                    FreeMem(t, sizeof(*t));
+                else
+                    t->base = NULL;
                 netstack_unlock();
                 sb_set_errno(base, we);
                 return SB_TRY_AGAIN;

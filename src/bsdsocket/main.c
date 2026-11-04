@@ -167,14 +167,20 @@ void sb_child_cleanup(struct SocketBase *b, BOOL ownerAlive)
 
     /* A forward lookup still waited for (only possible for a dead opener: its
      * task died inside sb_dns_query): lwIP will still call back - the ticket
-     * is abandoned, the callback frees it and never reaches this base. Only
-     * the opener's own task sets dnsTicket, so the test needs no lock (and a
-     * failed LibOpen, possibly before the core lock exists, never takes it). */
+     * is abandoned, the callback frees it and never reaches this base. If the
+     * callback already ran (the task died before it saw the answer) it will
+     * not run again: the ticket is freed here. Only the opener's own task sets
+     * dnsTicket, so the test needs no lock (and a failed LibOpen, possibly
+     * before the core lock exists, never takes it). */
     if (b->dnsTicket != NULL)
     {
         netstack_lock();
-        b->dnsTicket->base = NULL;
+        struct sb_dns_ticket *t = b->dnsTicket;
         b->dnsTicket = NULL;
+        if (t->done)
+            FreeMem(t, sizeof(*t));
+        else
+            t->base = NULL;
         netstack_unlock();
     }
 
