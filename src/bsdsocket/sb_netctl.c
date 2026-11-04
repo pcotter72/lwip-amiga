@@ -357,21 +357,16 @@ static void sb_opener_mark_dead(struct SocketBase *root, struct SocketBase *b)
 
 /* Stack task, under openLock, for a base whose task is gone (task == NULL):
  * do what the opener's own CloseLibrary would have done, from here. Returns
- * FALSE when it has to wait for the next sweep: a DNS callback is still
- * owed to the base (lwIP delivers it within DNS_MAX_RETRIES seconds, with
- * NULL at worst), or its timer request did not come back from the abort
- * yet. The base memory is freed only when nothing can reach it any more.
+ * FALSE when it has to wait for the next sweep: its timer request did not
+ * come back from the abort yet. A DNS lookup still out does not hold it up
+ * any more: sb_child_cleanup abandons its ticket, lwIP's late callback frees
+ * the ticket and never reaches the base. The base memory is freed only when
+ * nothing can reach it any more.
  * The signal bits of the dead task are not freed (they died with it: a
  * FreeSignal here would clear bits of THIS task). LibExpunge is never run
  * from here - the stack task lives in this code; exec calls it later. */
 static BOOL sb_opener_reap(struct SocketBase *root, struct SocketBase *b)
 {
-    netstack_lock();
-    UBYTE dnsPending = b->dnsPending; /* the callback runs on this task, under the lock */
-    netstack_unlock();
-    if (dnsPending != 0)
-        return FALSE;
-
     if (b->timerArmed)
     {
         if (CheckIO(&b->timerReq->tr_node) == NULL)

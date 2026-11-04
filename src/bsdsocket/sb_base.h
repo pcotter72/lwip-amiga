@@ -633,6 +633,24 @@ struct SbReleased
     struct SbSocket *s;
 };
 
+/* One forward lookup in flight (sb_resolver.c). lwIP's callback argument is
+ * this ticket, never the base: lwIP calls back for every queued request, with
+ * the answer or with NULL after its retries (several seconds), whether or not
+ * anybody still waits. A waiter that gives up (EINTR), or the stack task
+ * releasing a dead opener, sets base = NULL; the callback then frees the
+ * ticket and touches nothing else. So a late answer can neither write into a
+ * base that LibClose freed nor complete a later lookup of the same opener
+ * with the old result. Allocated by the opener, freed by whichever side comes
+ * last; base, done and the result are only touched under the core lock. */
+struct sb_dns_ticket
+{
+    struct SocketBase *base; /* the waiting opener; NULL = abandoned, the callback frees it */
+    ip_addr_t addr;          /* the answer (also lwIP's out-parameter for a cached hit) */
+    LONG err;                /* 0 or SB_HOST_NOT_FOUND */
+    UBYTE done;              /* the callback has run */
+    UBYTE pad[3];
+};
+
 /* --- the library base ------------------------------------------------------ */
 
 struct SocketBase
@@ -654,8 +672,8 @@ struct SocketBase
                          * stack task (SIGBREAKF_CTRL_E). Under openLock. */
     UBYTE pad3[3];
     ULONG deadOpeners;  /* openers whose task is gone (exited without CloseLibrary) and
-                         * whose resources are not released yet (a DNS query or a timer
-                         * request of theirs is still outstanding): never signalled
+                         * whose resources are not released yet (a timer request of
+                         * theirs is still outstanding): never signalled
                          * again, still counted as open. Under openLock. */
     ULONG releasedOpeners; /* openers whose task was gone and whose resources the stack
                             * task released (sb_opener_reap); for the log. Under openLock. */
@@ -716,8 +734,7 @@ struct SocketBase
     char taskName[32];  /* the opener task's name at LibOpen, for the log: the task's
                          * own ln_Name memory is gone by the time its death is seen */
     BYTE sigBit;        /* the wait bit of the header's blocking pattern; -1 if AllocSignal failed */
-    UBYTE dnsPending;   /* dns_gethostbyname() callbacks still to come for this base (core
-                         * lock): the base must not be freed while one is outstanding */
+    UBYTE pad0a;
     UBYTE timerArmed;   /* a timerReq is out (SendIO without its WaitIO yet); set and cleared
                          * by the opener task, read by the stack task when the opener is gone */
     UBYTE pad0;
@@ -750,7 +767,7 @@ struct SocketBase
                                   * must then be freed from another task without FreeSignal() */
     struct timerequest *timerReq; /* UNIT_MICROHZ; one request, reused per blocking call */
     UBYTE timerOpen;   /* timer.device opened; FALSE => sb_wait_to falls back to blocking forever */
-    UBYTE dnsDone;     /* handshake cell: the resolver callback sets it, then signals sigBit */
+    UBYTE pad1a;
     UBYTE txSinceBlock; /* this opener has sent since it last blocked for input (its own task) */
     UBYTE pad1;
 
@@ -758,8 +775,8 @@ struct SocketBase
      * straight into these fields, so each result stays valid only until the
      * same opener's next call in that family — the classic BSD contract, and
      * why they live per-base rather than in the root. */
-    ip_addr_t dnsAddr; /* dns_gethostbyname result cell, filled by sb_dns_cb */
-    LONG dnsErr;       /* 0 or SB_HOST_NOT_FOUND, from the same callback */
+    struct sb_dns_ticket *dnsTicket; /* the forward lookup this opener waits for, NULL
+                                      * when none (core lock); sb_child_cleanup abandons it */
     struct sb_hostent host;         /* gethostbyname/byaddr result; points at the fields below */
     char hostName[SB_HOSTNAME_MAX]; /* h_name backing store */
     ULONG hostAddr;        /* network order; the single address h_addr_list[0] points at */

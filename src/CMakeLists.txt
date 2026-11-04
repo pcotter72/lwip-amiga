@@ -14,6 +14,12 @@ if(NOT DEFINED lwip-amiga_VERSION_MAJOR)
     set(lwip-amiga_VERSION_MINOR 0)
 endif()
 math(EXPR BSDSOCKET_REVISION "${lwip-amiga_VERSION_MAJOR} * 100 + ${lwip-amiga_VERSION_MINOR}")
+# CaffeineOS fork: a fixed build between component releases gets its own library
+# revision (-DBSDSOCKET_REVISION_OVERRIDE=109) so it can be told apart from the release
+# it is based on; the component release string (lwip-amiga x.y) stays as it is.
+if(DEFINED BSDSOCKET_REVISION_OVERRIDE AND NOT BSDSOCKET_REVISION_OVERRIDE STREQUAL "")
+    set(BSDSOCKET_REVISION ${BSDSOCKET_REVISION_OVERRIDE})
+endif()
 
 # Version string (fleet convention)
 string(TIMESTAMP CURRENT_DATE "(%d.%m.%Y)")

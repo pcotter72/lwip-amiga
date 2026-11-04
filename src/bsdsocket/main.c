@@ -164,6 +164,20 @@ static void sb_port_free(struct MsgPort *mp, BOOL sigAlive)
 void sb_child_cleanup(struct SocketBase *b, BOOL ownerAlive)
 {
     KprintfT("[bsdsocket] %s: base 0x%08lx alive=%ld\n", __func__, (ULONG)b, (LONG)ownerAlive);
+
+    /* A forward lookup still waited for (only possible for a dead opener: its
+     * task died inside sb_dns_query): lwIP will still call back - the ticket
+     * is abandoned, the callback frees it and never reaches this base. Only
+     * the opener's own task sets dnsTicket, so the test needs no lock (and a
+     * failed LibOpen, possibly before the core lock exists, never takes it). */
+    if (b->dnsTicket != NULL)
+    {
+        netstack_lock();
+        b->dnsTicket->base = NULL;
+        b->dnsTicket = NULL;
+        netstack_unlock();
+    }
+
     if (b->fd != NULL)
     {
         /* orphaned sockets die with the base */
@@ -281,8 +295,7 @@ struct SocketBase *LibOpen(ULONG version asm("d0"), struct SocketBase *base asm(
                       : NULL;
     b->timerOpen = FALSE;
     b->timerArmed = FALSE;
-    b->dnsDone = FALSE;
-    b->dnsPending = 0;
+    b->dnsTicket = NULL;
     b->fdCount = SB_FD_COUNT;
     b->fd = AllocMem(b->fdCount * sizeof(struct SbSocket *), MEMF_PUBLIC | MEMF_CLEAR);
 

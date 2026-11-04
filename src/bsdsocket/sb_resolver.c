@@ -16,24 +16,31 @@
 
 #include "netstack.h"
 
+/* lwIP's answer for one ticket (stack task, core lock held). An abandoned
+ * ticket - its waiter gave up, closed the library or died - is only freed:
+ * the base it belonged to may be gone, or busy with a newer lookup. */
 static void sb_dns_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
 {
     KprintfT("[bsdsocket] %s: name=%s found=%ld\n", __func__, (ULONG)name, (LONG)(ipaddr != NULL));
-    struct SocketBase *base = arg;
+    struct sb_dns_ticket *t = arg;
     (void)name;
 
+    struct SocketBase *base = t->base;
+    if (base == NULL)
+    {
+        FreeMem(t, sizeof(*t));
+        return;
+    }
     if (ipaddr != NULL)
     {
-        base->dnsAddr = *ipaddr;
-        base->dnsErr = 0;
+        t->addr = *ipaddr;
+        t->err = 0;
     }
     else
     {
-        base->dnsErr = SB_HOST_NOT_FOUND;
+        t->err = SB_HOST_NOT_FOUND;
     }
-    base->dnsDone = TRUE;
-    if (base->dnsPending != 0)
-        base->dnsPending--; /* this base may be freed once no callback is owed */
+    t->done = TRUE;
     if (base->task != NULL) /* NULL: the opener ended without closing the library */
         Signal(base->task, 1UL << base->sigBit);
 }
@@ -60,36 +67,46 @@ static struct sb_hostent *sb_host_fill(struct SocketBase *base, const char *name
 static LONG sb_dns_query(struct SocketBase *base, const char *name, ULONG *addr)
 {
     KprintfT("[bsdsocket] %s: name=%s\n", __func__, (ULONG)name);
-    netstack_lock();
-    base->dnsDone = FALSE;
-    base->dnsErr = 0;
+    /* a ticket per lookup, see struct sb_dns_ticket */
+    struct sb_dns_ticket *t = AllocMem(sizeof(*t), MEMF_PUBLIC | MEMF_CLEAR);
+    if (t == NULL)
+    {
+        sb_set_errno(base, SB_ENOMEM);
+        return SB_TRY_AGAIN;
+    }
+    t->base = base;
 
-    err_t r = dns_gethostbyname(name, &base->dnsAddr, sb_dns_cb, base);
+    netstack_lock();
+    /* ERR_INPROGRESS: lwIP stored the callback and will call it exactly once
+     * (answer, or NULL after its retries). Any other result: no callback
+     * (ERR_OK filled t->addr from the cache or a literal; dns_enqueue clears
+     * the request again before it returns ERR_MEM). */
+    err_t r = dns_gethostbyname(name, &t->addr, sb_dns_cb, t);
     if (r == ERR_INPROGRESS)
     {
-        /* lwIP calls sb_dns_cb for every queued request, with the answer or
-         * with NULL after its retries (dns_call_found): the count goes back
-         * down even when this task gives up waiting below */
-        base->dnsPending++;
-        while (!base->dnsDone)
+        base->dnsTicket = t;
+        while (!t->done)
         {
             LONG we = sb_wait(base);
             if (we != 0)
             {
+                /* give the ticket to the callback, which frees it */
+                t->base = NULL;
+                base->dnsTicket = NULL;
                 netstack_unlock();
                 sb_set_errno(base, we);
                 return SB_TRY_AGAIN;
             }
         }
-        r = base->dnsErr == 0 ? ERR_OK : ERR_VAL;
+        base->dnsTicket = NULL;
+        r = t->err == 0 ? ERR_OK : ERR_VAL;
     }
     netstack_unlock();
 
-    if (r != ERR_OK)
-        return SB_HOST_NOT_FOUND;
-
-    *addr = ip4_addr_get_u32(ip_2_ip4(&base->dnsAddr));
-    return 0;
+    if (r == ERR_OK)
+        *addr = ip4_addr_get_u32(ip_2_ip4(&t->addr));
+    FreeMem(t, sizeof(*t)); /* done, or never handed to lwIP: no callback can follow */
+    return r == ERR_OK ? 0 : SB_HOST_NOT_FOUND;
 }
 
 /* If @name is unqualified (contains no dot) and @domain is set, compose
