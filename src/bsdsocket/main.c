@@ -12,6 +12,7 @@
 
 #include "sb_base.h"
 
+#include <exec/execbase.h> /* CACRF_ClearI */
 #include <exec/resident.h>
 
 #include <minlist.h>
@@ -264,6 +265,19 @@ struct SocketBase *LibOpen(ULONG version asm("d0"), struct SocketBase *base asm(
         return NULL;
     }
     memcpy(mem, (UBYTE *)root - negSize, negSize + posSize);
+
+    /* The copy holds a jump table, and every call of this opener goes
+     * through it: it is code written to memory, so the instruction cache has
+     * to be flushed for it before the first call (exec.doc, CacheClearE,
+     * V37). Without the flush a CPU with an instruction cache - and Emu68's
+     * JIT, which keeps a translated block until the next flush - still runs
+     * what was executed at these addresses before: the code of a program
+     * that ended since the last flush and whose memory this block now is.
+     * Measured 15.11.2026 on Emu68 (A1200, A500, A600): a stub that had run
+     * at the address of a vector ran again in place of the vector; seen in
+     * the field as "illegal instruction" in a program right after its
+     * OpenLibrary (WHDUpdate under WHDMassUpdate). */
+    CacheClearE(mem, negSize, CACRF_ClearI);
 
     struct SocketBase *b = (struct SocketBase *)(mem + negSize);
     b->root = root;
